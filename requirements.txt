@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+openai
+requests
+SpeechRecognition
+sounddevice
+gtts
+python-dotenv
+pyaudio
+numpy
+pygame

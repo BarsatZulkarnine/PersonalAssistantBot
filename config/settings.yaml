@@ -1,0 +1,55 @@
+# Application Settings
+app:
+  name: "Voice Assistant"
+  version: "2.0.0"
+  debug: true
+
+# Speech Recognition
+speech:
+  hotword: "hey pi"
+  listen_timeout: 5
+  phrase_time_limit: 10
+  language: "en"
+
+# Text-to-Speech
+tts:
+  provider: "gtts"  # Options: gtts, elevenlabs, piper, azure
+  language: "en"
+  speed: 1.0
+  streaming: false  # Enable sentence-by-sentence playback
+
+# AI Configuration
+ai:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  temperature: 0.7
+  max_tokens: 500
+
+# Intent Classification
+intent:
+  confidence_threshold: 0.7
+  fallback_to_ai: true
+
+# Security
+security:
+  require_confirmation:
+    - send_email
+    - delete_file
+    - system_command
+  require_auth:
+    - payment
+    - sensitive_data
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/assistant.log"
+  max_size_mb: 10
+  backup_count: 5
+  log_conversations: true
+
+# Performance
+performance:
+  cache_responses: true
+  cache_ttl_seconds: 3600
+  parallel_execution: false
