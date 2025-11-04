@@ -4,6 +4,7 @@ Main Orchestrator
 Coordinates all modules to handle user interactions.
 """
 
+import sys
 from typing import Optional
 from core.module_loader import get_module_loader
 from modules.wake_word.base import WakeWordDetector
@@ -48,40 +49,48 @@ class AssistantOrchestrator:
             try:
                 self.wake_word = self.loader.load_module('wake_word')
                 logger.info(f"Wake word: {self.wake_word.__class__.__name__}")
-                print(f"✅ Wake word: {self.wake_word.__class__.__name__}")
+                print(f"[OK] Wake word: {self.wake_word.__class__.__name__}")
+                sys.stdout.flush()
             except Exception as e:
                 logger.warning(f"Wake word module failed: {e}")
-                print(f"⚠️  Wake word detection disabled (error: {e})")
+                print(f"[WARN] Wake word detection disabled (error: {e})")
+                sys.stdout.flush()
                 self.wake_word = None
             
             # Load STT
             try:
                 self.stt = self.loader.load_module('stt')
                 logger.info(f"STT: {self.stt.__class__.__name__}")
-                print(f"✅ STT: {self.stt.__class__.__name__}")
+                print(f"[OK] STT: {self.stt.__class__.__name__}")
+                sys.stdout.flush()
             except Exception as e:
                 logger.error(f"STT module failed: {e}")
-                print(f"❌ STT module failed: {e}")
+                print(f"[FAIL] STT module failed: {e}")
+                sys.stdout.flush()
                 raise
             
             # Load TTS
             try:
                 self.tts = self.loader.load_module('tts')
                 logger.info(f"TTS: {self.tts.__class__.__name__}")
-                print(f"✅ TTS: {self.tts.__class__.__name__}")
+                print(f"[OK] TTS: {self.tts.__class__.__name__}")
+                sys.stdout.flush()
             except Exception as e:
                 logger.error(f"TTS module failed: {e}")
-                print(f"❌ TTS module failed: {e}")
+                print(f"[FAIL] TTS module failed: {e}")
+                sys.stdout.flush()
                 raise
             
             # Load intent detector
             try:
                 self.intent = self.loader.load_module('intent')
                 logger.info(f"Intent: {self.intent.__class__.__name__}")
-                print(f"✅ Intent: {self.intent.__class__.__name__}")
+                print(f"[OK] Intent: {self.intent.__class__.__name__}")
+                sys.stdout.flush()
             except Exception as e:
                 logger.error(f"Intent module failed: {e}")
-                print(f"❌ Intent module failed: {e}")
+                print(f"[FAIL] Intent module failed: {e}")
+                sys.stdout.flush()
                 raise
             
             # Load action registry
@@ -89,18 +98,22 @@ class AssistantOrchestrator:
                 from modules.actions.registry import get_action_registry
                 self.actions = get_action_registry()
                 logger.info(f"Actions: {len(self.actions.list_actions())} loaded")
-                print(f"✅ Actions: {len(self.actions.list_actions())} loaded")
+                print(f"[OK] Actions: {len(self.actions.list_actions())} loaded")
+                sys.stdout.flush()
             except Exception as e:
                 logger.error(f"Actions failed: {e}")
-                print(f"❌ Actions failed: {e}")
+                print(f"[FAIL] Actions failed: {e}")
+                sys.stdout.flush()
                 raise
             
             logger.info("All modules initialized successfully!")
-            print("🎉 All modules initialized!")
+            print("[OK] All modules initialized!")
+            sys.stdout.flush()
             
         except Exception as e:
             logger.error(f"Module initialization failed: {e}", exc_info=True)
-            print(f"❌ Module initialization failed: {e}")
+            print(f"[FAIL] Module initialization failed: {e}")
+            sys.stdout.flush()
             raise
     
     async def wait_for_wake_word(self) -> bool:
@@ -123,7 +136,7 @@ class AssistantOrchestrator:
             return detected
         except Exception as e:
             logger.error(f"Wake word error: {e}")
-            print(f"Wake word error: {e}")
+            print(f"⚠️  Wake word error: {e}")
             return True  # Continue anyway
     
     def listen_to_user(self) -> str:
@@ -134,6 +147,8 @@ class AssistantOrchestrator:
             Transcribed text or empty string
         """
         logger.debug("Recording user speech...")
+        print("[LISTEN] Recording...")
+        sys.stdout.flush()
         result = self.stt.listen()
         
         if result.is_empty():
@@ -141,6 +156,8 @@ class AssistantOrchestrator:
             return ""
         
         logger.info(f"Heard: {result.text}")
+        print(f"[HEARD] {result.text}")
+        sys.stdout.flush()
         return result.text
     
     async def detect_intent(self, text: str) -> IntentType:
@@ -154,12 +171,16 @@ class AssistantOrchestrator:
             IntentType (AI, Web, or Action)
         """
         logger.debug(f"Detecting intent for: {text}")
+        print(f"[INTENT] Classifying...")
+        sys.stdout.flush()
         result = await self.intent.detect(text)
         
         logger.info(
             f"Intent: {result.intent_type.value} "
             f"(confidence: {result.confidence:.2f})"
         )
+        print(f"[INTENT] {result.intent_type.value} (conf: {result.confidence:.2f})")
+        sys.stdout.flush()
         
         return result.intent_type
     
@@ -174,22 +195,30 @@ class AssistantOrchestrator:
             Response message
         """
         logger.debug(f"Executing action for: {text}")
+        print(f"[ACTION] Finding action...")
+        sys.stdout.flush()
         
         # Find matching action
         action = self.actions.find_action_for_prompt(text)
         
         if not action:
             logger.warning("No matching action found")
+            print("[WARN] No matching action")
             return "I'm not sure how to do that."
         
         # Execute
+        print(f"[ACTION] Executing: {action.name}")
+        sys.stdout.flush()
         result = await action.execute(text)
         
         if result.success:
             logger.info(f"Action completed: {action.name}")
+            print(f"[OK] Action completed")
         else:
             logger.warning(f"Action failed: {result.message}")
+            print(f"[FAIL] {result.message}")
         
+        sys.stdout.flush()
         return result.message
     
     async def handle_web_search(self, text: str) -> str:
@@ -203,14 +232,22 @@ class AssistantOrchestrator:
             Search results or answer
         """
         logger.debug(f"Web search for: {text}")
+        print(f"[WEB] Searching for: {text}")
+        sys.stdout.flush()
         
         # Find web search action
-        web_action = self.actions.get_action_by_category("web")
+        web_action = None
+        for action in self.actions.get_all_actions().values():
+            if action.name == "WebSearchAction":
+                web_action = action
+                break
         
         if web_action:
             result = await web_action.execute(text)
             return result.message
         
+        logger.warning("Web search action not found")
+        print("[WARN] Web search action not available")
         return "Web search not available yet."
     
     async def handle_conversation(self, text: str) -> str:
@@ -224,14 +261,21 @@ class AssistantOrchestrator:
             AI response
         """
         logger.debug(f"Conversation: {text}")
+        print(f"[AI] Processing: {text}")
+        sys.stdout.flush()
         
         # Find conversation action
-        conv_action = self.actions.get_action_by_category("conversation")
+        conv_action = None
+        for action in self.actions.get_all_actions().values():
+            if action.name == "AIChatAction":
+                conv_action = action
+                break
         
         if conv_action:
             result = await conv_action.execute(text)
             return result.message
         
+        logger.warning("AI chat action not found")
         return "I'm not sure how to respond to that."
     
     def speak(self, text: str):
@@ -242,6 +286,8 @@ class AssistantOrchestrator:
             text: Text to speak
         """
         logger.debug(f"Speaking: {text[:50]}...")
+        print(f"[SPEAK] {text[:80]}...")
+        sys.stdout.flush()
         
         # Use streaming if enabled
         config = self.tts.config
@@ -290,6 +336,8 @@ class AssistantOrchestrator:
         5. Repeat
         """
         logger.info("Starting assistant loop...")
+        print("[START] Assistant loop starting...")
+        sys.stdout.flush()
         
         while True:
             try:
@@ -310,6 +358,8 @@ class AssistantOrchestrator:
                 
                 # Respond
                 logger.info(f"Response: {response}")
+                print(f"[RESPONSE] {response[:80]}...")
+                sys.stdout.flush()
                 self.speak(response)
                 
             except KeyboardInterrupt:
@@ -317,6 +367,8 @@ class AssistantOrchestrator:
                 break
             except Exception as e:
                 logger.error(f"Error in main loop: {e}", exc_info=True)
+                print(f"[ERROR] {e}")
+                sys.stdout.flush()
                 self.speak("Sorry, something went wrong.")
                 continue
     
