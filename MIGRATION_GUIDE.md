@@ -218,8 +218,8 @@ print(f"❌ Action failed: {e}")
 from app.utils.logger import get_logger
 
 logger = get_logger('my_module')
-logger.info("🎤 Listening...")
-logger.error(f"❌ Action failed: {e}", exc_info=True)
+logger.info("Listening...")
+logger.error(f"Action failed: {e}", exc_info=True)
 ```
 
 ✅ **Proper logging with levels, rotation, and file output!**

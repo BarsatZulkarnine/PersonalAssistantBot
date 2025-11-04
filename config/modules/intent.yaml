@@ -1,0 +1,27 @@
+# Intent Detection Module Configuration
+
+# Provider: simple_ai, advanced, rule_based
+provider: "simple_ai"
+
+# Simple AI settings (returns: AI, Web, Action)
+simple_ai:
+  model: "gpt-4o-mini"
+  temperature: 0.3
+  categories:
+    - "AI"      # General conversation
+    - "Web"     # Web search/knowledge
+    - "Action"  # Execute action
+
+# Advanced settings (with parameter extraction)
+advanced:
+  model: "gpt-4o-mini"
+  temperature: 0.3
+  confidence_threshold: 0.7
+  extract_parameters: true
+  fallback_to_simple: true
+
+# Rule-based settings
+rule_based:
+  use_fuzzy_matching: true
+  fuzzy_threshold: 80  # Percentage match
+  cache_results: true

@@ -1,0 +1,36 @@
+# Speech-to-Text Module Configuration
+
+# Provider: google, whisper, azure, assemblyai
+provider: "google"
+
+# Recording settings
+recording:
+  timeout: 5            # Max wait for speech start (seconds)
+  phrase_time_limit: 15 # Max recording duration (seconds)
+  pause_threshold: 0.8  # Silence duration to end recording (seconds)
+  energy_threshold: 300 # Voice activity detection
+  dynamic_energy: true  # Auto-adjust for ambient noise
+
+# Language settings
+language: "en-US"
+alternative_languages: []  # e.g., ["es-ES", "fr-FR"]
+
+# Provider-specific settings
+
+# Google STT
+google:
+  use_enhanced: true    # Use enhanced models
+  model: "default"      # default, command_and_search, phone_call
+
+# Whisper (local)
+whisper:
+  model_size: "base"    # tiny, base, small, medium, large
+  device: "cpu"         # cpu, cuda
+  language: "en"
+  temperature: 0.0
+
+# Azure STT
+azure:
+  subscription_key: null
+  region: "eastus"
+  recognition_mode: "interactive"  # interactive, conversation, dictation

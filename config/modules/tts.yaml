@@ -1,0 +1,54 @@
+# Text-to-Speech Module Configuration
+
+# Provider: gtts, elevenlabs, piper, azure, google_cloud
+provider: "gtts"
+
+# General settings
+language: "en"
+speed: 1.0              # Speed multiplier
+pitch: 1.0              # Pitch multiplier
+volume: 1.0             # Volume (0.0 to 1.0)
+
+# Streaming settings
+streaming:
+  enabled: true         # Sentence-by-sentence playback
+  chunk_size: "sentence" # sentence, word, character
+
+# Voice selection
+voice:
+  name: null            # Provider-specific voice name
+  gender: "neutral"     # male, female, neutral
+  age: "adult"          # child, adult, senior
+
+# Provider-specific settings
+
+# gTTS (Google Text-to-Speech)
+gtts:
+  tld: "com"            # Top-level domain (com, co.uk, etc.)
+  slow: false
+
+# ElevenLabs
+elevenlabs:
+  api_key: null
+  model: "eleven_monolingual_v1"
+  voice_id: null        # Specific voice ID
+  stability: 0.5
+  similarity_boost: 0.75
+
+# Piper (local)
+piper:
+  model_path: "models/piper/en_US-lessac-medium"
+  speaker: 0
+
+# Azure TTS
+azure:
+  subscription_key: null
+  region: "eastus"
+  voice_name: "en-US-JennyNeural"
+
+# Google Cloud TTS
+google_cloud:
+  credentials_path: null
+  voice_name: "en-US-Neural2-C"
+  speaking_rate: 1.0
+  pitch: 0.0

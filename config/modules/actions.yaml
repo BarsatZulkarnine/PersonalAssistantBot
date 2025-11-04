@@ -1,0 +1,67 @@
+# Actions Module Configuration
+
+# Action categories enabled
+categories:
+  home_automation: true
+  productivity: true
+  system: true
+  conversation: true
+
+# Home Automation Actions
+home_automation:
+  lights:
+    enabled: true
+    provider: "hue"  # hue, homeassistant, mqtt
+    intents:
+      - "turn on light"
+      - "turn off light"
+      - "dim light"
+  
+  thermostat:
+    enabled: false
+    provider: "nest"
+
+# Productivity Actions
+productivity:
+  email:
+    enabled: false  # Enable when ready
+    requires_confirmation: true
+    smtp_config:
+      host: null
+      port: 587
+      use_tls: true
+    
+  todo:
+    enabled: false
+    storage: "data/todos.json"
+    intents:
+      - "add todo"
+      - "add task"
+      - "remind me"
+
+# System Actions
+system:
+  volume:
+    enabled: true
+    step: 10  # Percentage
+    intents:
+      - "volume up"
+      - "volume down"
+  
+  apps:
+    enabled: true
+    allowed_apps:
+      - chrome
+      - firefox
+      - vscode
+    intents:
+      - "open {app}"
+      - "launch {app}"
+
+# Conversation Actions
+conversation:
+  ai_chat:
+    enabled: true
+    model: "gpt-4o-mini"
+    personality: "witty"  # witty, professional, friendly
+    temperature: 0.7

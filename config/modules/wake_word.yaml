@@ -1,0 +1,26 @@
+# Wake Word Detection Module Configuration
+
+# Provider selection: simple, vosk, porcupine, snowboy
+provider: "simple"  # Use simple (Google STT) for out-of-the-box functionality
+
+# Wake word settings
+wake_word: "hey pi"
+
+# Detection settings
+sensitivity: 0.5        # 0.0 to 1.0 (higher = more sensitive)
+timeout: null           # null = infinite wait
+energy_threshold: 300   # Voice activity detection threshold
+
+# Resource usage
+low_power_mode: true    # Optimize for low resource usage
+sample_rate: 16000      # Audio sample rate (Hz)
+
+# Porcupine specific (if using Porcupine)
+porcupine:
+  access_key: null      # Required for Porcupine
+  model_path: null      # Custom model path
+
+# Vosk specific (if using Vosk)
+vosk:
+  model_path: "models/vosk-model-small-en-us-0.15"
+  confidence_threshold: 0.8

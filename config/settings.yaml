@@ -16,7 +16,9 @@ tts:
   provider: "gtts"  # Options: gtts, elevenlabs, piper, azure
   language: "en"
   speed: 1.0
-  streaming: false  # Enable sentence-by-sentence playback
+  pitch: 1.0
+  voice: null  # Specific voice (provider-dependent)
+  streaming: true  # Enable sentence-by-sentence playback (recommended!)
 
 # AI Configuration
 ai:

@@ -1,0 +1,53 @@
+# Security Configuration
+
+# Confirmation requirements
+confirmation:
+  enabled: true
+  timeout: 30  # Seconds to wait for confirmation
+  
+  # Actions requiring confirmation
+  require_for:
+    - send_email
+    - delete_file
+    - make_payment
+    - system_shutdown
+    - change_password
+  
+  # Confirmation methods
+  method: "voice"  # voice, pin, biometric
+
+# Permissions
+permissions:
+  enabled: false  # Enable multi-user permissions
+  
+  # User roles
+  roles:
+    admin:
+      can_execute:
+        - all
+    user:
+      can_execute:
+        - home_automation
+        - system.volume
+        - conversation
+      cannot_execute:
+        - productivity.email
+        - system.shutdown
+    guest:
+      can_execute:
+        - conversation
+      cannot_execute:
+        - all_actions
+
+# Rate limiting
+rate_limiting:
+  enabled: true
+  max_requests_per_minute: 30
+  max_actions_per_minute: 10
+
+# Audit logging
+audit:
+  enabled: true
+  log_all_commands: true
+  log_confirmations: true
+  retention_days: 90
