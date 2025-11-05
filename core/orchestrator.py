@@ -381,3 +381,45 @@ class AssistantOrchestrator:
             'intent': self.intent is not None,
             'actions': len(self.actions.list_actions()) if self.actions else 0
         }
+    
+    async def run_text_loop(self):
+        """Interactive console mode"""
+        print("Text mode. Type 'exit' to quit.")
+        
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def get_input():
+            try:
+                return input("> ")
+            except EOFError:
+                return None
+        
+        with ThreadPoolExecutor() as executor:
+            while True:
+                try:
+                    # Get input asynchronously
+                    user_input = await asyncio.get_event_loop().run_in_executor(executor, get_input)
+                    
+                    if user_input is None or user_input.lower() == 'exit':
+                        break
+                    
+                    if not user_input.strip():
+                        continue
+                        
+                    # Process without STT/TTS
+                    response = await self.process_user_input(user_input)
+                    print(f"\nAssistant: {response}\n")
+                    
+                except KeyboardInterrupt:
+                    print("\nShutting down...")
+                    break
+                except Exception as e:
+                    print(f"\nError: {e}\n")
+    
+    async def run_headless(self):
+        """Headless mode for automation/API"""
+        # Initialize only required modules (no STT/TTS)
+        self.stt = None
+        self.tts = None
+        # Keep intent detection and actions

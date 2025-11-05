@@ -444,12 +444,12 @@ recording:
 ## 📊 Module Status
 
 | Module | Interface | Implementations | Config | Status |
-|--------|-----------|----------------|--------|--------|
-| Wake Word | ✅ | Vosk, Porcupine | ✅ | ⚠️ WIP |
-| STT | ✅ | Google, Whisper | ✅ | ✅ Done |
-| TTS | ✅ | gTTS, ElevenLabs, Piper | ✅ | ⚠️ WIP |
-| Intent | ✅ | Simple AI, Advanced | ✅ | ✅ Done |
-| Actions | ✅ | 4 categories | ✅ | ⚠️ WIP |
+|--------|-----------|----------------|---------|--------|
+| Wake Word | ✅ | Simple, Vosk | ✅ | ⚠️ Vosk WIP |
+| STT | ✅ | Google | ✅ | ✅ Done |
+| TTS | ✅ | GTTS | ✅ | ✅ Done |
+| Intent | ✅ | Simple AI | ✅ | ✅ Done |
+| Actions | ✅ | All Categories | ✅ | ⚠️ Some WIP |
 
 ---
 
