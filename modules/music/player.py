@@ -1,10 +1,7 @@
 """
-Music Player System - FIXED VERSION
+Music Player System - WITH AUTO-PAUSE FOR WAKE WORD
 
-Key changes:
-1. Uses pygame.mixer.Sound instead of pygame.mixer.music for independent playback
-2. Runs in background thread so TTS doesn't interrupt
-3. Non-blocking playback
+Automatically pauses music when "hey pi" is detected and resumes after response
 """
 
 import os
@@ -23,6 +20,7 @@ class PlaybackState(Enum):
     STOPPED = "stopped"
     PLAYING = "playing"
     PAUSED = "paused"
+    AUTO_PAUSED = "auto_paused"  # NEW: Auto-paused for voice interaction
 
 class RepeatMode(Enum):
     NONE = "none"
@@ -46,7 +44,6 @@ class Song:
     
     def get_safe_name(self) -> str:
         """Get ASCII-safe name for logging"""
-        # Replace problematic unicode characters
         safe = self.name
         replacements = {
             '\u2012': '-', '\u2013': '-', '\u2014': '--',
@@ -58,11 +55,11 @@ class Song:
 
 class MusicPlayer:
     """
-    Music player with background playback.
+    Music player with background playback and auto-pause support.
     
-    Key fixes:
-    - Uses Sound objects for independent channel
-    - Background thread for non-blocking playback
+    Features:
+    - Auto-pauses when wake word detected
+    - Auto-resumes after assistant response
     - Won't be interrupted by TTS
     """
     
@@ -86,6 +83,10 @@ class MusicPlayer:
         self.volume = config.get('playback', {}).get('volume', 0.7)
         self.shuffle_enabled = config.get('playback', {}).get('shuffle', False)
         self.repeat_mode = RepeatMode(config.get('playback', {}).get('repeat', 'none'))
+        
+        # NEW: Auto-pause settings
+        self.auto_pause_enabled = config.get('playback', {}).get('auto_pause', True)
+        self.was_playing_before_pause = False
         
         # Threading
         self.playback_thread: Optional[threading.Thread] = None
@@ -163,12 +164,13 @@ class MusicPlayer:
             logger.error(f"Playback error: {e}")
             self.state = PlaybackState.STOPPED
     
-    def play(self, query: Optional[str] = None) -> str:
+    def play(self, query: Optional[str] = None, use_youtube: bool = True) -> str:
         """
         Play music in background (non-blocking).
         
         Args:
             query: Song name, artist, or None for random
+            use_youtube: Whether to search YouTube if not found locally
             
         Returns:
             Status message
@@ -182,12 +184,36 @@ class MusicPlayer:
             song = self._find_song(query)
             
             # Try YouTube if not found locally
-            if not song and self.youtube and self.youtube.available:
+            if not song and use_youtube and self.youtube and self.youtube.available:
                 print(f"[MUSIC] Not found locally, searching YouTube...")
-                file_path = self.youtube.search_and_download(query)
-                if file_path:
-                    song = Song(file_path)
-                    song.source = "youtube"
+                
+                # Use stream + background download
+                stream_url, cache_path = self.youtube.get_stream_and_download(query)
+                
+                if stream_url:
+                    # Check if it's a cached file or stream URL
+                    if stream_url.startswith('http'):
+                        print(f"[MUSIC] 🌐 Streaming from YouTube...")
+                        # For now, we need the file downloaded
+                        # TODO: Support direct URL streaming
+                        print(f"[MUSIC] ⏳ Waiting for download...")
+                        
+                        # Wait a bit for download to complete
+                        max_wait = 60  # 60 seconds max
+                        waited = 0
+                        while not os.path.exists(cache_path) and waited < max_wait:
+                            time.sleep(1)
+                            waited += 1
+                        
+                        if os.path.exists(cache_path):
+                            song = Song(cache_path)
+                            song.source = "youtube"
+                        else:
+                            return f"Download timed out for '{query}'"
+                    else:
+                        # Already cached
+                        song = Song(stream_url)
+                        song.source = "youtube"
                 else:
                     return f"Could not find '{query}' locally or on YouTube"
             elif not song:
@@ -217,8 +243,49 @@ class MusicPlayer:
         
         return f"Now playing {self.current_song.name}"
     
+    # NEW: Auto-pause methods for wake word detection
+    def auto_pause(self) -> bool:
+        """
+        Auto-pause music (called when wake word detected).
+        
+        Returns:
+            True if music was paused, False if nothing was playing
+        """
+        if not self.auto_pause_enabled:
+            return False
+        
+        if self.state == PlaybackState.PLAYING:
+            self.music_channel.pause()
+            self.state = PlaybackState.AUTO_PAUSED
+            self.was_playing_before_pause = True
+            logger.info("Auto-paused for voice interaction")
+            return True
+        
+        self.was_playing_before_pause = False
+        return False
+    
+    def auto_resume(self) -> bool:
+        """
+        Auto-resume music (called after assistant response).
+        
+        Returns:
+            True if music was resumed, False if nothing to resume
+        """
+        if not self.auto_pause_enabled:
+            return False
+        
+        if self.state == PlaybackState.AUTO_PAUSED and self.was_playing_before_pause:
+            self.music_channel.unpause()
+            self.state = PlaybackState.PLAYING
+            self.was_playing_before_pause = False
+            logger.info("Auto-resumed after voice interaction")
+            return True
+        
+        self.was_playing_before_pause = False
+        return False
+    
     def pause(self) -> str:
-        """Pause playback"""
+        """Pause playback (manual)"""
         if self.state == PlaybackState.PLAYING:
             self.music_channel.pause()
             self.state = PlaybackState.PAUSED
@@ -227,10 +294,11 @@ class MusicPlayer:
         return "Nothing is playing"
     
     def resume(self) -> str:
-        """Resume playback"""
-        if self.state == PlaybackState.PAUSED:
+        """Resume playback (manual)"""
+        if self.state in [PlaybackState.PAUSED, PlaybackState.AUTO_PAUSED]:
             self.music_channel.unpause()
             self.state = PlaybackState.PLAYING
+            self.was_playing_before_pause = False
             logger.info("Resumed")
             return "Music resumed"
         return "Nothing to resume"
@@ -240,6 +308,7 @@ class MusicPlayer:
         self.stop_flag.set()
         self.music_channel.stop()
         self.state = PlaybackState.STOPPED
+        self.was_playing_before_pause = False
         
         if self.current_song:
             logger.info(f"Stopped: {self.current_song.name}")
@@ -298,6 +367,12 @@ class MusicPlayer:
         logger.info(f"Shuffle: {self.shuffle_enabled}")
         return f"Shuffle {'enabled' if self.shuffle_enabled else 'disabled'}"
     
+    def toggle_auto_pause(self) -> str:
+        """Toggle auto-pause feature"""
+        self.auto_pause_enabled = not self.auto_pause_enabled
+        logger.info(f"Auto-pause: {self.auto_pause_enabled}")
+        return f"Auto-pause {'enabled' if self.auto_pause_enabled else 'disabled'}"
+    
     def add_to_queue(self, query: str) -> str:
         """Add song to queue"""
         song = self._find_song(query)
@@ -322,7 +397,8 @@ class MusicPlayer:
             'shuffle': self.shuffle_enabled,
             'repeat': self.repeat_mode.value,
             'queue_length': len(self.queue),
-            'library_size': len(self.library)
+            'library_size': len(self.library),
+            'auto_pause': self.auto_pause_enabled
         }
     
     def _find_song(self, query: str) -> Optional[Song]:

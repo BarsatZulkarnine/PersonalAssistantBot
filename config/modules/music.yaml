@@ -6,7 +6,7 @@ music:
     - "C:/Users/msi/Music"  # Windows
     #- "~/Music"                   # Linux/Mac
     #- "D:/Songs"                  # Additional directory
-  
+    - "./data/music_cache"           # Application data directory
   # Supported formats
   formats:
     - mp3
@@ -29,6 +29,7 @@ playback:
   shuffle: false
   repeat: "none"  # none, one, all
   crossfade_seconds: 0
+  auto_pasue: true
 
 # Playlist storage
 playlists:
