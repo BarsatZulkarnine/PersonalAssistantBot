@@ -1,0 +1,48 @@
+# Music Player Configuration
+
+# Music directories
+music:
+  directories:
+    - "C:/Users/msi/Music"  # Windows
+    #- "~/Music"                   # Linux/Mac
+    #- "D:/Songs"                  # Additional directory
+  
+  # Supported formats
+  formats:
+    - mp3
+    - wav
+    - flac
+    - m4a
+    - ogg
+    - wma
+
+# YouTube integration
+youtube:
+  enabled: true
+  quality: "audio"  # audio, 360p, 720p, 1080p
+  download_dir: "data/music_cache"
+  cache_limit_mb: 500  # Max cache size
+
+# Playback settings
+playback:
+  volume: 0.7  # 0.0 to 1.0
+  shuffle: false
+  repeat: "none"  # none, one, all
+  crossfade_seconds: 0
+
+# Playlist storage
+playlists:
+  storage: "data/playlists"
+  auto_save: true
+
+# Voice commands
+commands:
+  play: ["play", "play music", "start playing"]
+  pause: ["pause", "pause music", "stop playing"]
+  resume: ["resume", "continue", "unpause"]
+  stop: ["stop", "stop music"]
+  next: ["next", "next song", "skip"]
+  previous: ["previous", "previous song", "back"]
+  volume_up: ["louder", "volume up", "increase volume"]
+  volume_down: ["quieter", "volume down", "decrease volume"]
+  shuffle: ["shuffle", "shuffle on", "shuffle off"]

@@ -30,6 +30,7 @@ ENV/
 logs/*
 *.log
 logs/
+data
 
 # IDE
 .vscode/

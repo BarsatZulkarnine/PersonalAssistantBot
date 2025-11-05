@@ -15,6 +15,7 @@ class ActionCategory(Enum):
     PRODUCTIVITY = "productivity"
     SYSTEM = "system"
     CONVERSATION = "conversation"
+    ENTERTAINMENT = "entertainment"
 
 class SecurityLevel(Enum):
     """Security levels for actions"""

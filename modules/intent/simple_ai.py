@@ -49,8 +49,10 @@ Classify the user's input into ONE of these categories:
 2. **Web** - Web search, current information, real-time data, facts that change
    Examples: "What's the weather?", "Who won the game?", "Search for Python tutorials"
 
-3. **Action** - Execute a system action, control devices, open apps
-   Examples: "Turn on lights", "Set volume to 50", "Open Chrome", "Send email"
+3. **Action** - Execute a system action, control devices, open apps, PLAY MUSIC
+   Examples: "Turn on lights", "Set volume to 50", "Open Chrome", "Play music", "Play [song name]"
+
+IMPORTANT: Any command to PLAY, PAUSE, STOP music is an Action, not AI.
 
 Reply with ONLY ONE WORD: AI, Web, or Action
 
@@ -86,7 +88,7 @@ Nothing else. Just the category."""
             )
             
         except Exception as e:
-            logger.error(f"Intent detection failed: {e}")
+            logger.error(f"❌ Intent detection failed: {e}")
             # Fallback to AI/conversation
             return IntentResult(
                 intent_type=IntentType.AI,

@@ -31,7 +31,7 @@ class ActionRegistry:
         actions_dir = Path(__file__).parent
         
         # Discover from each category folder
-        categories = ['home_automation', 'productivity', 'system', 'conversation']
+        categories = ['home_automation', 'productivity', 'system', 'conversation', 'entertainment']
         
         for category in categories:
             category_dir = actions_dir / category
@@ -90,6 +90,10 @@ class ActionRegistry:
         """
         Find best matching action for a prompt.
         
+        Priority order:
+        1. Specific actions (music, volume, etc.)
+        2. Conversation action (catch-all)
+        
         Args:
             prompt: User's input
             
@@ -98,8 +102,24 @@ class ActionRegistry:
         """
         prompt_lower = prompt.lower()
         
-        # Try exact matches first
-        for action in self._actions.values():
+        # Priority 1: Check specific actions first (NOT conversation)
+        specific_actions = [
+            action for action in self._actions.values()
+            if action.category != ActionCategory.CONVERSATION
+        ]
+        
+        for action in specific_actions:
+            if action.matches(prompt_lower):
+                logger.debug(f"Matched: {action.name}")
+                return action
+        
+        # Priority 2: Try conversation actions last (they're catch-all)
+        conversation_actions = [
+            action for action in self._actions.values()
+            if action.category == ActionCategory.CONVERSATION
+        ]
+        
+        for action in conversation_actions:
             if action.matches(prompt_lower):
                 logger.debug(f"Matched: {action.name}")
                 return action
