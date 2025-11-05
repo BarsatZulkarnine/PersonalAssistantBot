@@ -13,6 +13,7 @@ from modules.tts.base import TTSProvider
 from modules.intent.base import IntentDetector, IntentType
 from modules.actions.registry import ActionRegistry
 from utils.logger import get_logger
+import asyncio
 
 logger = get_logger('orchestrator')
 
@@ -37,6 +38,9 @@ class AssistantOrchestrator:
         self.tts: Optional[TTSProvider] = None
         self.intent: Optional[IntentDetector] = None
         self.actions: Optional[ActionRegistry] = None
+        
+        # Music player reference (for auto-pause)
+        self.music_player = None
         
         self._initialize_modules()
     
@@ -100,6 +104,10 @@ class AssistantOrchestrator:
                 logger.info(f"Actions: {len(self.actions.list_actions())} loaded")
                 print(f"[OK] Actions: {len(self.actions.list_actions())} loaded")
                 sys.stdout.flush()
+                
+                # Get music player reference for auto-pause
+                self._get_music_player_reference()
+                
             except Exception as e:
                 logger.error(f"Actions failed: {e}")
                 print(f"[FAIL] Actions failed: {e}")
@@ -115,6 +123,51 @@ class AssistantOrchestrator:
             print(f"[FAIL] Module initialization failed: {e}")
             sys.stdout.flush()
             raise
+    
+    def _get_music_player_reference(self):
+        """Get reference to music player for auto-pause"""
+        try:
+            for action in self.actions.get_all_actions().values():
+                if action.name == "MusicAction" and hasattr(action, 'player'):
+                    self.music_player = action.player
+                    logger.info("Music player reference obtained for auto-pause")
+                    break
+        except Exception as e:
+            logger.debug(f"Could not get music player reference: {e}")
+    
+    def _pause_all_audio(self):
+        """Pause all audio outputs (music, TTS, etc.)"""
+        paused_something = False
+        
+        # Pause music if playing
+        if self.music_player:
+            try:
+                if self.music_player.auto_pause():
+                    logger.info("Auto-paused music for wake word")
+                    paused_something = True
+            except Exception as e:
+                logger.debug(f"Music pause failed: {e}")
+        
+        # Stop TTS if speaking
+        if self.tts and hasattr(self.tts, 'is_speaking') and self.tts.is_speaking:
+            try:
+                self.tts.stop()
+                logger.info("Stopped TTS for wake word")
+                paused_something = True
+            except Exception as e:
+                logger.debug(f"TTS stop failed: {e}")
+        
+        return paused_something
+    
+    def _resume_all_audio(self):
+        """Resume paused audio outputs"""
+        # Resume music if it was auto-paused
+        if self.music_player:
+            try:
+                if self.music_player.auto_resume():
+                    logger.info("Auto-resumed music after interaction")
+            except Exception as e:
+                logger.debug(f"Music resume failed: {e}")
     
     async def wait_for_wake_word(self) -> bool:
         """
@@ -133,6 +186,11 @@ class AssistantOrchestrator:
             self.wake_word.start()
             detected = self.wake_word.wait_for_wake_word()
             self.wake_word.stop()
+            
+            # Pause all audio when wake word detected
+            if detected:
+                self._pause_all_audio()
+            
             return detected
         except Exception as e:
             logger.error(f"Wake word error: {e}")
@@ -318,22 +376,33 @@ class AssistantOrchestrator:
             else:  # AI/Conversation
                 response = await self.handle_conversation(user_input)
             
+            # Log the conversation
+            from utils.logger import log_conversation
+            log_conversation(user_input, response)
+            
             return response
             
         except Exception as e:
             logger.error(f"Error processing input: {e}", exc_info=True)
-            return "Sorry, I encountered an error processing your request."
-    
+            error_response = "Sorry, I encountered an error processing your request."
+            
+            # Log error conversation too
+            from utils.logger import log_conversation
+            log_conversation(user_input, error_response)
+            
+            return error_response
+        
     async def run_loop(self):
         """
-        Main assistant loop.
+        Main assistant loop (voice input, voice output).
         
         Flow:
         1. Wait for wake word
         2. Listen to user
         3. Process input
         4. Speak response
-        5. Repeat
+        5. Resume audio
+        6. Repeat
         """
         logger.info("Starting assistant loop...")
         print("[START] Assistant loop starting...")
@@ -341,7 +410,7 @@ class AssistantOrchestrator:
         
         while True:
             try:
-                # Wait for wake word
+                # Wait for wake word (pauses audio automatically)
                 if not await self.wait_for_wake_word():
                     continue
                 
@@ -351,6 +420,8 @@ class AssistantOrchestrator:
                 # Listen
                 user_input = self.listen_to_user()
                 if not user_input:
+                    # Resume audio if no input
+                    self._resume_all_audio()
                     continue
                 
                 # Process
@@ -362,6 +433,9 @@ class AssistantOrchestrator:
                 sys.stdout.flush()
                 self.speak(response)
                 
+                # Resume paused audio after response
+                self._resume_all_audio()
+                
             except KeyboardInterrupt:
                 logger.info("Interrupted by user")
                 break
@@ -370,20 +444,11 @@ class AssistantOrchestrator:
                 print(f"[ERROR] {e}")
                 sys.stdout.flush()
                 self.speak("Sorry, something went wrong.")
+                self._resume_all_audio()
                 continue
     
-    def get_status(self) -> dict:
-        """Get status of all modules"""
-        return {
-            'wake_word': self.wake_word is not None,
-            'stt': self.stt is not None,
-            'tts': self.tts is not None,
-            'intent': self.intent is not None,
-            'actions': len(self.actions.list_actions()) if self.actions else 0
-        }
-    
     async def run_text_loop(self):
-        """Interactive console mode"""
+        """Interactive console mode (text input, text output)"""
         print("Text mode. Type 'exit' to quit.")
         
         import asyncio
@@ -417,9 +482,113 @@ class AssistantOrchestrator:
                 except Exception as e:
                     print(f"\nError: {e}\n")
     
+    async def run_voice_to_text_loop(self):
+        """Voice input, text output mode"""
+        logger.info("Starting voice-to-text loop...")
+        print("[START] Voice-to-text mode...")
+        sys.stdout.flush()
+        
+        while True:
+            try:
+                # Wait for wake word (pauses audio)
+                if not await self.wait_for_wake_word():
+                    continue
+                
+                # Acknowledge (text only)
+                print("\n[ASSISTANT] Listening...")
+                sys.stdout.flush()
+                
+                # Listen
+                user_input = self.listen_to_user()
+                if not user_input:
+                    self._resume_all_audio()
+                    continue
+                
+                # Process
+                response = await self.process_user_input(user_input)
+                
+                # Respond with text only (no TTS)
+                logger.info(f"Response: {response}")
+                print(f"\n[ASSISTANT] {response}\n")
+                sys.stdout.flush()
+                
+                # Resume audio
+                self._resume_all_audio()
+                
+            except KeyboardInterrupt:
+                logger.info("Interrupted by user")
+                break
+            except Exception as e:
+                logger.error(f"Error in voice-to-text loop: {e}", exc_info=True)
+                print(f"[ERROR] {e}")
+                sys.stdout.flush()
+                self._resume_all_audio()
+                continue
+    
+    async def run_text_to_voice_loop(self):
+        """Text input, voice output mode"""
+        print("Text-to-voice mode. Type 'exit' to quit.\n")
+        
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def get_input():
+            try:
+                return input("> ")
+            except EOFError:
+                return None
+        
+        with ThreadPoolExecutor() as executor:
+            while True:
+                try:
+                    # Get input asynchronously
+                    user_input = await asyncio.get_event_loop().run_in_executor(executor, get_input)
+                    
+                    if user_input is None or user_input.lower() == 'exit':
+                        break
+                    
+                    if not user_input.strip():
+                        continue
+                    
+                    # Pause any playing audio
+                    self._pause_all_audio()
+                    
+                    # Process
+                    response = await self.process_user_input(user_input)
+                    
+                    # Speak response
+                    logger.info(f"Response: {response}")
+                    self.speak(response)
+                    
+                    # Resume audio
+                    self._resume_all_audio()
+                    
+                except KeyboardInterrupt:
+                    print("\nShutting down...")
+                    break
+                except Exception as e:
+                    print(f"\nError: {e}\n")
+                    self._resume_all_audio()
+    
+    def get_status(self) -> dict:
+        """Get status of all modules"""
+        return {
+            'wake_word': self.wake_word is not None,
+            'stt': self.stt is not None,
+            'tts': self.tts is not None,
+            'intent': self.intent is not None,
+            'actions': len(self.actions.list_actions()) if self.actions else 0
+        }
+    
     async def run_headless(self):
         """Headless mode for automation/API"""
         # Initialize only required modules (no STT/TTS)
-        self.stt = None
-        self.tts = None
-        # Keep intent detection and actions
+        logger.info("Headless mode - minimal initialization")
+        print("[INFO] Headless mode ready for API/automation")
+        
+        # Keep running for API access
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Headless mode stopped")

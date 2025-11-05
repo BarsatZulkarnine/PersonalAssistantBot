@@ -137,6 +137,8 @@ class ModuleLoader:
         if module_type == 'stt':
             class_name += 'STT'
         elif module_type == 'tts':
+            if provider == 'openai_tts':
+                return 'OpenAITTS'
             class_name += 'TTS' if not class_name.endswith('TTS') else ''
         elif module_type == 'intent':
             class_name += 'Intent'

@@ -1,10 +1,11 @@
 """
-Logging System - FIXED FOR UNICODE
+Logging System - FIXED FOR UNICODE + CONVERSATION LOGGING
 
 Key changes:
 1. UTF-8 encoding for file handlers
 2. Error handling for console output on Windows
 3. Sanitizes problematic characters before logging
+4. FIXED: Conversation logging now works properly
 """
 
 import logging
@@ -65,16 +66,9 @@ class LoggerManager:
             5  # 5 backups
         )
         
-        # Setup conversation logger
+        # Setup conversation logger (separate file)
         conv_log = log_dir / f"conversations_{datetime.now().strftime('%Y%m%d')}.log"
-        self._setup_logger(
-            'conversations',
-            str(conv_log),
-            'INFO',
-            10 * 1024 * 1024,
-            5,
-            simple_format=True
-        )
+        self._setup_conversation_logger(str(conv_log))
     
     def _setup_logger(
         self,
@@ -89,6 +83,7 @@ class LoggerManager:
         logger = logging.getLogger(name)
         logger.setLevel(getattr(logging, level.upper()))
         logger.handlers = []  # Clear existing
+        logger.propagate = False  # Don't propagate to root
         
         # Format
         if simple_format:
@@ -126,6 +121,35 @@ class LoggerManager:
         
         self._loggers[name] = logger
     
+    def _setup_conversation_logger(self, log_file: str):
+        """Setup dedicated conversation logger"""
+        logger = logging.getLogger('conversations')
+        logger.setLevel(logging.INFO)
+        logger.handlers = []  # Clear existing
+        logger.propagate = False  # Don't propagate to root
+        
+        # Simple format for conversations
+        formatter = SafeFormatter(
+            '%(asctime)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # File handler only (no console spam)
+        try:
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=10 * 1024 * 1024,  # 10MB
+                backupCount=30,  # Keep 30 days
+                encoding='utf-8'
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            print(f"[OK] Conversation logging to: {log_file}")
+        except Exception as e:
+            print(f"[FAIL] Conversation logging failed: {e}")
+        
+        self._loggers['conversations'] = logger
+    
     def get_logger(self, name: str = 'assistant') -> logging.Logger:
         """Get logger instance"""
         full_name = f'assistant.{name}' if name != 'assistant' else name
@@ -133,11 +157,12 @@ class LoggerManager:
         if full_name not in self._loggers:
             logger = logging.getLogger(full_name)
             logger.setLevel(logging.DEBUG)
+            logger.propagate = False
             
-            # Inherit handlers from parent
-            if name != 'assistant' and not logger.handlers:
+            # Use parent's handlers if available
+            if name != 'assistant':
                 parent_logger = self._loggers.get('assistant')
-                if parent_logger:
+                if parent_logger and parent_logger.handlers:
                     for handler in parent_logger.handlers:
                         logger.addHandler(handler)
             
@@ -146,14 +171,32 @@ class LoggerManager:
         return self._loggers[full_name]
     
     def log_conversation(self, user_input: str, assistant_response: str):
-        """Log conversation exchange"""
-        conv_logger = self.get_logger('conversations')
-        # Sanitize unicode characters for safety
-        user_safe = self._sanitize_text(user_input)
-        response_safe = self._sanitize_text(assistant_response)
-        conv_logger.info(f"USER: {user_safe}")
-        conv_logger.info(f"ASSISTANT: {response_safe}")
-        conv_logger.info("---")
+        """
+        Log conversation exchange to dedicated conversation log.
+        
+        Args:
+            user_input: What the user said
+            assistant_response: What the assistant responded
+        """
+        try:
+            conv_logger = logging.getLogger('conversations')
+            
+            # Sanitize unicode characters for safety
+            user_safe = self._sanitize_text(user_input)
+            response_safe = self._sanitize_text(assistant_response)
+            
+            # Log the exchange
+            conv_logger.info(f"USER: {user_safe}")
+            conv_logger.info(f"ASSISTANT: {response_safe}")
+            conv_logger.info("=" * 80)
+            
+            # Force flush to ensure it's written
+            for handler in conv_logger.handlers:
+                if hasattr(handler, 'flush'):
+                    handler.flush()
+                    
+        except Exception as e:
+            print(f"[WARN] Failed to log conversation: {e}")
     
     def _sanitize_text(self, text: str) -> str:
         """Replace problematic unicode characters"""
@@ -193,7 +236,13 @@ def get_logger(name: str = 'assistant') -> logging.Logger:
     return _logger_manager.get_logger(name)
 
 def log_conversation(user_input: str, assistant_response: str):
-    """Log conversation - convenience function"""
+    """
+    Log conversation - convenience function.
+    
+    Args:
+        user_input: What the user said
+        assistant_response: What the assistant responded
+    """
     global _logger_manager
     if _logger_manager is None:
         _logger_manager = LoggerManager()

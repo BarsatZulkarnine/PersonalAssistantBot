@@ -1,11 +1,11 @@
 # Text-to-Speech Module Configuration
 
-# Provider: gtts, elevenlabs, piper, azure, google_cloud
-provider: "gtts"
+# Provider: gtts, elevenlabs, piper, azure, google_cloud, openai_tts
+provider: "openai_tts"
 
 # General settings
 language: "en"
-speed: 1.0              # Speed multiplier
+speed: 1.1              # Speed multiplier
 pitch: 1.0              # Pitch multiplier
 volume: 1.0             # Volume (0.0 to 1.0)
 
@@ -52,3 +52,9 @@ google_cloud:
   voice_name: "en-US-Neural2-C"
   speaking_rate: 1.0
   pitch: 0.0
+
+# OpenAI TTS
+openai_tts:
+  model: "gpt-4o-mini-tts"   # Available models: gpt-4o-mini-tts, gpt-4o-tts
+  voice: "sage"             # alloy, verse, shimmer, coral, sage
+  api_key: null              # Optional if set in environment variable OPENAI_API_KEY
