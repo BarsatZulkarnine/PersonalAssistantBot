@@ -1,13 +1,11 @@
 """
-YouTube Music Streamer - FIXED VERSION
+YouTube Music Streamer - WINDOWS CONSOLE FIX
 
-Fixes:
-1. Proper string handling (no bytes issues)
-2. Better error handling
-3. Cleaner file path management
+Key fix: Redirect yt-dlp output to avoid Windows console encoding errors
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 from utils.logger import get_logger
@@ -54,14 +52,26 @@ class YouTubeStreamer:
         try:
             print(f"[YOUTUBE] Searching for: {query}")
             
-            # Ensure query is a string (not bytes)
+            # Ensure query is a string
             if isinstance(query, bytes):
                 query = query.decode('utf-8')
             
-            # Download options
+            # CRITICAL FIX: Create a custom logger that redirects yt-dlp output
+            # This prevents Windows console encoding errors
+            class QuietLogger:
+                def debug(self, msg):
+                    pass
+                def info(self, msg):
+                    pass
+                def warning(self, msg):
+                    pass
+                def error(self, msg):
+                    logger.error(f"yt-dlp: {msg}")
+            
+            # Download options with NOPROGRESS to avoid console issues
             ydl_opts = {
                 'format': 'bestaudio/best',
-                'outtmpl': str(self.cache_dir / '%(title)s.%(ext)s'),  # Ensure string
+                'outtmpl': str(self.cache_dir / '%(title)s.%(ext)s'),
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
@@ -69,55 +79,71 @@ class YouTubeStreamer:
                 }],
                 'quiet': True,
                 'no_warnings': True,
-                'noplaylist': True,  # Don't download playlists
+                'noplaylist': True,
                 'no_color': True,
                 'extract_flat': False,
+                'noprogress': True,  # KEY FIX: Disable progress display
+                'logger': QuietLogger(),  # KEY FIX: Custom logger
+                'nocheckcertificate': True,
             }
             
             # Search and download
             search_query = f"ytsearch1:{query}"
             
-            with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Extract info
-                info = ydl.extract_info(search_query, download=True)
-                
-                if not info:
-                    logger.error("No search results")
-                    return None
-                
-                # Get first result
-                if 'entries' in info:
-                    info = info['entries'][0]
-                
-                # Get title and build file path
-                title = info.get('title', 'unknown')
-                
-                # Sanitize title for filename
-                title = self._sanitize_filename(title)
-                
-                # Build expected file path
-                file_path = self.cache_dir / f"{title}.mp3"
-                
-                # Sometimes yt-dlp uses a different filename
-                # Try to find the downloaded file
-                downloaded_files = list(self.cache_dir.glob('*.mp3'))
-                if downloaded_files:
-                    # Get most recent file
-                    file_path = max(downloaded_files, key=lambda p: p.stat().st_mtime)
-                
-                if file_path.exists():
-                    print(f"[YOUTUBE] ✅ Downloaded: {file_path.name}")
-                    logger.info(f"Downloaded: {file_path.name}")
-                    return str(file_path)
-                
-                logger.error("Download completed but file not found")
+            # CRITICAL: Suppress stdout/stderr during download to avoid encoding issues
+            if sys.platform == 'win32':
+                # On Windows, redirect outputs to avoid console encoding errors
+                old_stdout = sys.stdout
+                old_stderr = sys.stderr
+                try:
+                    # Redirect to null
+                    with open(os.devnull, 'w') as devnull:
+                        sys.stdout = devnull
+                        sys.stderr = devnull
+                        
+                        with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            info = ydl.extract_info(search_query, download=True)
+                finally:
+                    # Restore outputs
+                    sys.stdout = old_stdout
+                    sys.stderr = old_stderr
+            else:
+                # On Linux/Mac, no need for redirection
+                with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(search_query, download=True)
+            
+            if not info:
+                logger.error("No search results")
                 return None
+            
+            # Get first result
+            if 'entries' in info:
+                info = info['entries'][0]
+            
+            # Get title
+            title = info.get('title', 'unknown')
+            
+            # Sanitize title for filename
+            title = self._sanitize_filename(title)
+            
+            # Find the downloaded file (most recent .mp3 in cache)
+            downloaded_files = list(self.cache_dir.glob('*.mp3'))
+            if downloaded_files:
+                # Get most recent file
+                file_path = max(downloaded_files, key=lambda p: p.stat().st_mtime)
                 
+                print(f"[YOUTUBE] ✅ Downloaded: {file_path.name}")
+                logger.info(f"Downloaded: {file_path.name}")
+                return str(file_path)
+            
+            logger.error("Download completed but file not found")
+            return None
+            
         except Exception as e:
             logger.error(f"YouTube download error: {e}")
             print(f"[FAIL] YouTube error: {e}")
             
-            # More detailed error info
+            # Detailed traceback
             import traceback
             logger.error(traceback.format_exc())
             
@@ -137,6 +163,14 @@ class YouTubeStreamer:
         invalid_chars = '<>:"/\\|?*'
         for char in invalid_chars:
             filename = filename.replace(char, '_')
+        
+        # Replace unicode dashes/quotes
+        replacements = {
+            '\u2012': '-', '\u2013': '-', '\u2014': '--',
+            '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"'
+        }
+        for old, new in replacements.items():
+            filename = filename.replace(old, new)
         
         # Limit length
         if len(filename) > 200:
@@ -162,32 +196,56 @@ class YouTubeStreamer:
             if isinstance(query, bytes):
                 query = query.decode('utf-8')
             
+            class QuietLogger:
+                def debug(self, msg): pass
+                def info(self, msg): pass
+                def warning(self, msg): pass
+                def error(self, msg):
+                    logger.error(f"yt-dlp: {msg}")
+            
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
                 'no_color': True,
+                'noprogress': True,
+                'logger': QuietLogger(),
             }
             
             search_query = f"ytsearch1:{query}"
             
-            with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(search_query, download=False)
-                
-                if not info:
-                    return None
-                
-                if 'entries' in info:
-                    info = info['entries'][0]
-                
-                url = info.get('url')
-                title = info.get('title', 'unknown')
-                
-                print(f"[YOUTUBE] Found: {title}")
-                logger.info(f"Found: {title}")
-                
-                return url
-                
+            # Redirect outputs on Windows
+            if sys.platform == 'win32':
+                old_stdout = sys.stdout
+                old_stderr = sys.stderr
+                try:
+                    with open(os.devnull, 'w') as devnull:
+                        sys.stdout = devnull
+                        sys.stderr = devnull
+                        
+                        with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            info = ydl.extract_info(search_query, download=False)
+                finally:
+                    sys.stdout = old_stdout
+                    sys.stderr = old_stderr
+            else:
+                with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(search_query, download=False)
+            
+            if not info:
+                return None
+            
+            if 'entries' in info:
+                info = info['entries'][0]
+            
+            url = info.get('url')
+            title = info.get('title', 'unknown')
+            
+            print(f"[YOUTUBE] Found: {title}")
+            logger.info(f"Found: {title}")
+            
+            return url
+            
         except Exception as e:
             logger.error(f"YouTube stream error: {e}")
             return None
