@@ -1,7 +1,10 @@
 """
-YouTube Music Streamer
+YouTube Music Streamer - FIXED VERSION
 
-Searches and plays music from YouTube.
+Fixes:
+1. Proper string handling (no bytes issues)
+2. Better error handling
+3. Cleaner file path management
 """
 
 import os
@@ -51,10 +54,14 @@ class YouTubeStreamer:
         try:
             print(f"[YOUTUBE] Searching for: {query}")
             
-            # Search options
+            # Ensure query is a string (not bytes)
+            if isinstance(query, bytes):
+                query = query.decode('utf-8')
+            
+            # Download options
             ydl_opts = {
                 'format': 'bestaudio/best',
-                'outtmpl': str(self.cache_dir / '%(title)s.%(ext)s'),
+                'outtmpl': str(self.cache_dir / '%(title)s.%(ext)s'),  # Ensure string
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
@@ -62,34 +69,80 @@ class YouTubeStreamer:
                 }],
                 'quiet': True,
                 'no_warnings': True,
-                'default_search': 'ytsearch1',  # Search and get first result
+                'noplaylist': True,  # Don't download playlists
+                'no_color': True,
+                'extract_flat': False,
             }
             
+            # Search and download
+            search_query = f"ytsearch1:{query}"
+            
             with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Search and download
-                info = ydl.extract_info(f"ytsearch1:{query}", download=True)
+                # Extract info
+                info = ydl.extract_info(search_query, download=True)
                 
                 if not info:
+                    logger.error("No search results")
                     return None
                 
-                # Get downloaded file path
+                # Get first result
                 if 'entries' in info:
                     info = info['entries'][0]
                 
+                # Get title and build file path
                 title = info.get('title', 'unknown')
+                
+                # Sanitize title for filename
+                title = self._sanitize_filename(title)
+                
+                # Build expected file path
                 file_path = self.cache_dir / f"{title}.mp3"
                 
+                # Sometimes yt-dlp uses a different filename
+                # Try to find the downloaded file
+                downloaded_files = list(self.cache_dir.glob('*.mp3'))
+                if downloaded_files:
+                    # Get most recent file
+                    file_path = max(downloaded_files, key=lambda p: p.stat().st_mtime)
+                
                 if file_path.exists():
-                    print(f"[YOUTUBE] Downloaded: {title}")
-                    logger.info(f"Downloaded: {title}")
+                    print(f"[YOUTUBE] ✅ Downloaded: {file_path.name}")
+                    logger.info(f"Downloaded: {file_path.name}")
                     return str(file_path)
                 
+                logger.error("Download completed but file not found")
                 return None
                 
         except Exception as e:
             logger.error(f"YouTube download error: {e}")
             print(f"[FAIL] YouTube error: {e}")
+            
+            # More detailed error info
+            import traceback
+            logger.error(traceback.format_exc())
+            
             return None
+    
+    def _sanitize_filename(self, filename: str) -> str:
+        """
+        Sanitize filename to remove problematic characters.
+        
+        Args:
+            filename: Original filename
+            
+        Returns:
+            Sanitized filename
+        """
+        # Remove or replace problematic characters
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            filename = filename.replace(char, '_')
+        
+        # Limit length
+        if len(filename) > 200:
+            filename = filename[:200]
+        
+        return filename
     
     def stream_url(self, query: str) -> Optional[str]:
         """
@@ -105,15 +158,21 @@ class YouTubeStreamer:
             return None
         
         try:
+            # Ensure string
+            if isinstance(query, bytes):
+                query = query.decode('utf-8')
+            
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
-                'default_search': 'ytsearch1',
+                'no_color': True,
             }
             
+            search_query = f"ytsearch1:{query}"
+            
             with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+                info = ydl.extract_info(search_query, download=False)
                 
                 if not info:
                     return None
@@ -121,7 +180,6 @@ class YouTubeStreamer:
                 if 'entries' in info:
                     info = info['entries'][0]
                 
-                # Get audio URL
                 url = info.get('url')
                 title = info.get('title', 'unknown')
                 
@@ -146,7 +204,7 @@ class YouTubeStreamer:
                 # Delete oldest files
                 files = sorted(self.cache_dir.glob('*'), key=lambda f: f.stat().st_mtime)
                 
-                while total_size_mb > max_size_mb * 0.8 and files:  # Clean to 80% of limit
+                while total_size_mb > max_size_mb * 0.8 and files:
                     file = files.pop(0)
                     size = file.stat().st_size / (1024 * 1024)
                     file.unlink()

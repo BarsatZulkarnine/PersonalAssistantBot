@@ -1,19 +1,21 @@
 """
-Music Player System
+Music Player System - FIXED VERSION
 
-Handles local music playback and streaming.
+Key changes:
+1. Uses pygame.mixer.Sound instead of pygame.mixer.music for independent playback
+2. Runs in background thread so TTS doesn't interrupt
+3. Non-blocking playback
 """
 
 import os
 import random
+import threading
+import time
 from pathlib import Path
 from typing import List, Optional, Dict
 from enum import Enum
 import pygame
 from utils.logger import get_logger
-import threading
-import time
-
 
 logger = get_logger('music.player')
 
@@ -34,41 +36,60 @@ class Song:
         self.filename = os.path.basename(path)
         self.name = os.path.splitext(self.filename)[0]
         self.directory = os.path.dirname(path)
-        self.source = "local"  # local or youtube
+        self.source = "local"
     
     def __str__(self):
         return self.name
     
     def __repr__(self):
         return f"Song({self.name})"
+    
+    def get_safe_name(self) -> str:
+        """Get ASCII-safe name for logging"""
+        # Replace problematic unicode characters
+        safe = self.name
+        replacements = {
+            '\u2012': '-', '\u2013': '-', '\u2014': '--',
+            '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"'
+        }
+        for old, new in replacements.items():
+            safe = safe.replace(old, new)
+        return safe
 
 class MusicPlayer:
     """
-    Music player with local and streaming support.
+    Music player with background playback.
     
-    Features:
-    - Play local music files
-    - Queue management
-    - Shuffle and repeat
-    - Volume control
-    - Playlist support
+    Key fixes:
+    - Uses Sound objects for independent channel
+    - Background thread for non-blocking playback
+    - Won't be interrupted by TTS
     """
     
     def __init__(self, config: dict):
         self.config = config
         
-        # Initialize pygame mixer
+        # Initialize pygame mixer with more channels
         if not pygame.mixer.get_init():
-            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
+        
+        # Reserve channel 0 for music (TTS will use music channel)
+        pygame.mixer.set_num_channels(8)
+        self.music_channel = pygame.mixer.Channel(0)
         
         # State
         self.state = PlaybackState.STOPPED
         self.current_song: Optional[Song] = None
+        self.current_sound: Optional[pygame.mixer.Sound] = None
         self.queue: List[Song] = []
         self.history: List[Song] = []
         self.volume = config.get('playback', {}).get('volume', 0.7)
         self.shuffle_enabled = config.get('playback', {}).get('shuffle', False)
         self.repeat_mode = RepeatMode(config.get('playback', {}).get('repeat', 'none'))
+        
+        # Threading
+        self.playback_thread: Optional[threading.Thread] = None
+        self.stop_flag = threading.Event()
         
         # Music library
         self.library: List[Song] = []
@@ -83,8 +104,6 @@ class MusicPlayer:
             except Exception as e:
                 logger.warning(f"YouTube unavailable: {e}")
         
-        pygame.mixer.music.set_volume(self.volume)
-        
         logger.info(f"[OK] Music player initialized ({len(self.library)} songs)")
         print(f"[OK] Music player: {len(self.library)} songs in library")
         if self.youtube and self.youtube.available:
@@ -98,43 +117,71 @@ class MusicPlayer:
         logger.info(f"Scanning {len(directories)} directories...")
         
         for directory in directories:
-            # Expand user path
             dir_path = Path(directory).expanduser()
             
             if not dir_path.exists():
                 logger.warning(f"Directory not found: {directory}")
                 continue
             
-            # Scan for music files
             for ext in formats:
                 for file_path in dir_path.rglob(f"*.{ext}"):
                     song = Song(str(file_path))
                     self.library.append(song)
         
         logger.info(f"Found {len(self.library)} songs")
-
-    def _monitor_playback(self):
-        """Monitor the song and update state when it finishes."""
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.5)
-        self.state = PlaybackState.STOPPED
     
+    def _playback_worker(self, song: Song):
+        """Background worker for music playback"""
+        try:
+            logger.info(f"Loading song: {song.name}")
+            
+            # Load as Sound object (not music)
+            sound = pygame.mixer.Sound(song.path)
+            self.current_sound = sound
+            sound.set_volume(self.volume)
+            
+            # Play on dedicated channel
+            self.music_channel.play(sound)
+            self.state = PlaybackState.PLAYING
+            
+            logger.info(f"Playing in background: {song.name}")
+            print(f"[MUSIC] ▶️  Now playing: {song.name}")
+            
+            # Wait for playback to finish
+            while self.music_channel.get_busy() and not self.stop_flag.is_set():
+                time.sleep(0.1)
+            
+            if not self.stop_flag.is_set():
+                self.state = PlaybackState.STOPPED
+                logger.info(f"Finished playing: {song.name}")
+                
+                # Auto-play next if queue exists
+                if self.queue:
+                    self.play()
+            
+        except Exception as e:
+            logger.error(f"Playback error: {e}")
+            self.state = PlaybackState.STOPPED
     
     def play(self, query: Optional[str] = None) -> str:
         """
-        Play music.
-
+        Play music in background (non-blocking).
+        
         Args:
             query: Song name, artist, or None for random
-
+            
         Returns:
             Status message
         """
-        # --- Find song ---
+        # Stop current playback
+        if self.state == PlaybackState.PLAYING:
+            self.stop()
+        
+        # Find song
         if query:
             song = self._find_song(query)
-
-            # If not found locally and YouTube is enabled
+            
+            # Try YouTube if not found locally
             if not song and self.youtube and self.youtube.available:
                 print(f"[MUSIC] Not found locally, searching YouTube...")
                 file_path = self.youtube.search_and_download(query)
@@ -145,49 +192,35 @@ class MusicPlayer:
                     return f"Could not find '{query}' locally or on YouTube"
             elif not song:
                 return f"Could not find '{query}' in library"
-
+            
             self.current_song = song
         else:
-            # Play from queue or random from library
+            # Play from queue or random
             if self.queue:
                 self.current_song = self.queue.pop(0)
             elif self.library:
                 self.current_song = random.choice(self.library)
             else:
                 return "No songs available"
-
-    # --- Playback thread ---
-        def _playback_thread(song_path: str):
-            try:
-                pygame.mixer.music.load(song_path)
-                pygame.mixer.music.set_volume(self.volume)
-                pygame.mixer.music.play()
-                self.state = PlaybackState.PLAYING
-
-                print(f"[DEBUG] Playback thread started: {song_path}")
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)  # keep thread alive while song is playing
-
-                self.state = PlaybackState.STOPPED
-                print(f"[DEBUG] Playback finished: {song_path}")
-            except Exception as e:
-                logger.error(f"Playback error in thread: {e}")
-                self.state = PlaybackState.STOPPED
-
-        # Start playback in a daemon thread
-        threading.Thread(target=_playback_thread, args=(self.current_song.path,), daemon=True).start()
-
+        
+        # Start playback in background thread
+        self.stop_flag.clear()
+        self.playback_thread = threading.Thread(
+            target=self._playback_worker,
+            args=(self.current_song,),
+            daemon=True
+        )
+        self.playback_thread.start()
+        
         source_label = "YouTube" if self.current_song.source == "youtube" else "Library"
-        logger.info(f"Playing ({source_label}): {self.current_song.name}")
-        print(f"[MUSIC] Playing from {source_label}: {self.current_song.name}")
-
+        logger.info(f"Started playback ({source_label}): {self.current_song.name}")
+        
         return f"Now playing {self.current_song.name}"
-
     
     def pause(self) -> str:
         """Pause playback"""
         if self.state == PlaybackState.PLAYING:
-            pygame.mixer.music.pause()
+            self.music_channel.pause()
             self.state = PlaybackState.PAUSED
             logger.info("Paused")
             return "Music paused"
@@ -196,7 +229,7 @@ class MusicPlayer:
     def resume(self) -> str:
         """Resume playback"""
         if self.state == PlaybackState.PAUSED:
-            pygame.mixer.music.unpause()
+            self.music_channel.unpause()
             self.state = PlaybackState.PLAYING
             logger.info("Resumed")
             return "Music resumed"
@@ -204,8 +237,10 @@ class MusicPlayer:
     
     def stop(self) -> str:
         """Stop playback"""
-        pygame.mixer.music.stop()
+        self.stop_flag.set()
+        self.music_channel.stop()
         self.state = PlaybackState.STOPPED
+        
         if self.current_song:
             logger.info(f"Stopped: {self.current_song.name}")
             return "Music stopped"
@@ -219,7 +254,6 @@ class MusicPlayer:
         if self.queue:
             return self.play()
         elif self.library:
-            # Play random from library
             return self.play()
         else:
             return "No more songs"
@@ -230,9 +264,14 @@ class MusicPlayer:
             song = self.history.pop()
             self.current_song = song
             
-            pygame.mixer.music.load(song.path)
-            pygame.mixer.music.play()
-            self.state = PlaybackState.PLAYING
+            # Use background playback
+            self.stop_flag.clear()
+            self.playback_thread = threading.Thread(
+                target=self._playback_worker,
+                args=(song,),
+                daemon=True
+            )
+            self.playback_thread.start()
             
             return f"Playing previous: {song.name}"
         return "No previous song"
@@ -240,7 +279,8 @@ class MusicPlayer:
     def set_volume(self, volume: float) -> str:
         """Set volume (0.0 to 1.0)"""
         self.volume = max(0.0, min(1.0, volume))
-        pygame.mixer.music.set_volume(self.volume)
+        if self.current_sound:
+            self.current_sound.set_volume(self.volume)
         logger.info(f"Volume set to {self.volume:.0%}")
         return f"Volume set to {self.volume:.0%}"
     
@@ -303,4 +343,4 @@ class MusicPlayer:
     
     def is_playing(self) -> bool:
         """Check if music is currently playing"""
-        return self.state == PlaybackState.PLAYING and pygame.mixer.music.get_busy()
+        return self.state == PlaybackState.PLAYING and self.music_channel.get_busy()
