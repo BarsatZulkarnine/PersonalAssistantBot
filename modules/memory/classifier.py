@@ -13,7 +13,6 @@ from typing import Optional, List
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
-
 from modules.memory.base import (
     MemoryClassifier, MemoryClassification, MemoryCategory, FactCategory
 )
@@ -131,6 +130,13 @@ For FACTUAL conversations, also extract specific facts and categorize them:
 - KNOWLEDGE: Learned information, skills
 - CONTEXT: Plans, decisions, ongoing situations
 - OPINION: Beliefs, viewpoints, thoughts
+
+**IMPORTANT**: When extracting facts, create COMPLETE, SEARCHABLE sentences, not just keywords.
+- ❌ BAD: "Alice", "March 15"
+- ✅ GOOD: "User's name is Alice", "User's birthday is March 15, 1990"
+
+The user's original sentence will be stored as-is for context, but extracted_facts should be 
+complete, standalone sentences that can be searched and understood independently.
 
 Return JSON format:
 {

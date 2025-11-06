@@ -137,43 +137,53 @@ class MemoryManager:
         assistant_response: str
     ):
         """Store extracted facts from a FACTUAL conversation"""
-        # Use extracted facts if available, otherwise use user input
-        facts_to_store = classification.extracted_facts or [user_input]
+        # CRITICAL FIX: Always use the full user input as the fact
+        # This preserves context and makes retrieval work
+        # The classifier's extracted_facts are just hints, not the actual content to store
         
-        for fact_text in facts_to_store:
-            # Create fact object
-            fact = Fact(
-                content=fact_text,
-                category=classification.fact_category or FactCategory.CONTEXT,
-                importance_score=classification.importance_score,
-                conversation_id=conversation_id,
-                message_id=f"msg_{conversation_id}_{self.turn_counter}"
-            )
+        # Build a complete, searchable fact from user input
+        fact_text = user_input
+        
+        # If there are extracted facts, create a more structured fact
+        if classification.extracted_facts:
+            # Combine user input with extracted facts for better context
+            extracted = ", ".join(classification.extracted_facts)
+            # Keep the original user input as it has the most context
+            fact_text = user_input
+        
+        # Create single fact from user input
+        fact = Fact(
+            content=fact_text,  # Full user sentence, not just keywords
+            category=classification.fact_category or FactCategory.CONTEXT,
+            importance_score=classification.importance_score,
+            conversation_id=conversation_id,
+            message_id=f"msg_{conversation_id}_{self.turn_counter}"
+        )
             
             # Store in SQL
-            fact_id = self.sql_store.store_fact(fact)
-            logger.info(f"Stored fact {fact_id}: {fact_text[:50]}...")
+        fact_id = self.sql_store.store_fact(fact)
+        logger.info(f"Stored fact {fact_id}: {fact_text[:50]}...")
             
             # Store in vector DB if available
-            if self.vector_store:
-                try:
-                    embedding_id = self.vector_store.add_embedding(
-                        fact_id=fact_id,
-                        content=fact_text,
-                        metadata={
-                            "user_id": "default_user",
-                            "category": fact.category.value if fact.category else "unknown",
-                            "importance": fact.importance_score,
-                            "created_at": datetime.now().isoformat()
-                        }
-                    )
-                    
-                    # Update SQL with embedding reference
-                    self.sql_store.update_fact_embedding(fact_id, embedding_id)
-                    logger.debug(f"Added embedding {embedding_id}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to add embedding: {e}")
+        if self.vector_store:
+            try:
+                embedding_id = self.vector_store.add_embedding(
+                    fact_id=fact_id,
+                    content=fact_text,
+                    metadata={
+                        "user_id": "default_user",
+                        "category": fact.category.value if fact.category else "unknown",
+                        "importance": fact.importance_score,
+                        "created_at": datetime.now().isoformat()
+                    }
+                )
+                
+                # Update SQL with embedding reference
+                self.sql_store.update_fact_embedding(fact_id, embedding_id)
+                logger.debug(f"Added embedding {embedding_id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to add embedding: {e}")
     
     async def retrieve_context(
         self,
