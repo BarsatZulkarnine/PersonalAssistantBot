@@ -1,10 +1,12 @@
 """
-Main Orchestrator
+Main Orchestrator - WITH MEMORY INTEGRATION
 
 Coordinates all modules to handle user interactions.
+NOW INCLUDES: Intelligent memory storage and retrieval!
 """
 
 import sys
+import time
 from typing import Optional
 from core.module_loader import get_module_loader
 from modules.wake_word.base import WakeWordDetector
@@ -15,6 +17,9 @@ from modules.actions.registry import ActionRegistry
 from utils.logger import get_logger
 import asyncio
 
+# NEW: Memory system
+from modules.memory import get_memory_manager, MemoryManager
+
 logger = get_logger('orchestrator')
 
 class AssistantOrchestrator:
@@ -24,9 +29,11 @@ class AssistantOrchestrator:
     Manages the complete flow:
     1. Wake word detection
     2. Speech recording & transcription
-    3. Intent detection
-    4. Action execution or AI response
-    5. Text-to-speech response
+    3. **[NEW] Retrieve relevant memory context**
+    4. Intent detection
+    5. Action execution or AI response (with context)
+    6. **[NEW] Store conversation in memory**
+    7. Text-to-speech response
     """
     
     def __init__(self):
@@ -38,6 +45,9 @@ class AssistantOrchestrator:
         self.tts: Optional[TTSProvider] = None
         self.intent: Optional[IntentDetector] = None
         self.actions: Optional[ActionRegistry] = None
+        
+        # NEW: Memory system
+        self.memory: Optional[MemoryManager] = None
         
         # Music player reference (for auto-pause)
         self.music_player = None
@@ -113,6 +123,18 @@ class AssistantOrchestrator:
                 print(f"[FAIL] Actions failed: {e}")
                 sys.stdout.flush()
                 raise
+            
+            # NEW: Load memory system
+            try:
+                self.memory = get_memory_manager()
+                logger.info("Memory system initialized")
+                print(f"[OK] Memory: Hybrid SQL + Vector storage")
+                sys.stdout.flush()
+            except Exception as e:
+                logger.error(f"Memory system failed: {e}")
+                print(f"[WARN] Memory disabled: {e}")
+                sys.stdout.flush()
+                self.memory = None
             
             logger.info("All modules initialized successfully!")
             print("[OK] All modules initialized!")
@@ -308,12 +330,13 @@ class AssistantOrchestrator:
         print("[WARN] Web search action not available")
         return "Web search not available yet."
     
-    async def handle_conversation(self, text: str) -> str:
+    async def handle_conversation(self, text: str, context: str = "") -> str:
         """
         Handle general conversation.
         
         Args:
             text: User's message
+            context: Memory context to inject (NEW!)
             
         Returns:
             AI response
@@ -330,7 +353,14 @@ class AssistantOrchestrator:
                 break
         
         if conv_action:
-            result = await conv_action.execute(text)
+            # NEW: Pass context via params
+            params = {}
+            if context:
+                params['memory_context'] = context
+                logger.info(f"Injecting memory context ({len(context)} chars)")
+                print(f"[MEMORY] Using {len(context)} chars of context")
+            
+            result = await conv_action.execute(text, params=params)
             return result.message
         
         logger.warning("AI chat action not found")
@@ -356,7 +386,7 @@ class AssistantOrchestrator:
     
     async def process_user_input(self, user_input: str) -> str:
         """
-        Process user input through the full pipeline.
+        Process user input through the full pipeline WITH MEMORY.
         
         Args:
             user_input: User's transcribed speech
@@ -364,19 +394,69 @@ class AssistantOrchestrator:
         Returns:
             Response message
         """
+        start_time = time.time()
+        
         try:
-            # Detect intent
+            # NEW: Step 1 - Retrieve memory context BEFORE processing
+            context = ""
+            if self.memory:
+                try:
+                    print(f"[MEMORY] Retrieving context...")
+                    context_results = await self.memory.retrieve_context(
+                        query=user_input,
+                        max_results=5,
+                        include_recent=True
+                    )
+                    
+                    if context_results:
+                        context = self.memory.format_context_for_prompt(
+                            context_results,
+                            max_length=500
+                        )
+                        logger.info(f"Retrieved {len(context_results)} memory items")
+                        print(f"[MEMORY] Found {len(context_results)} relevant memories")
+                except Exception as e:
+                    logger.error(f"Memory retrieval error: {e}")
+                    print(f"[WARN] Memory retrieval failed: {e}")
+            
+            # Step 2 - Detect intent
             intent_type = await self.detect_intent(user_input)
             
-            # Route based on intent
+            # Step 3 - Route based on intent (with context)
             if intent_type == IntentType.ACTION:
                 response = await self.handle_action(user_input)
             elif intent_type == IntentType.WEB:
                 response = await self.handle_web_search(user_input)
             else:  # AI/Conversation
-                response = await self.handle_conversation(user_input)
+                response = await self.handle_conversation(user_input, context)
             
-            # Log the conversation
+            # Calculate processing time
+            duration_ms = (time.time() - start_time) * 1000
+            
+            # NEW: Step 4 - Store conversation in memory AFTER getting response
+            if self.memory:
+                try:
+                    print(f"[MEMORY] Storing conversation...")
+                    classification = await self.memory.process_conversation(
+                        user_input=user_input,
+                        assistant_response=response,
+                        intent_type=intent_type.value,
+                        duration_ms=duration_ms,
+                        prompt_tokens=0,  # TODO: Track from AI calls
+                        completion_tokens=0
+                    )
+                    
+                    logger.info(
+                        f"Memory: {classification.category.value} "
+                        f"(importance: {classification.importance_score:.2f})"
+                    )
+                    print(f"[MEMORY] Stored as {classification.category.value}")
+                    
+                except Exception as e:
+                    logger.error(f"Memory storage error: {e}")
+                    print(f"[WARN] Memory storage failed: {e}")
+            
+            # Log the conversation (legacy logging)
             from utils.logger import log_conversation
             log_conversation(user_input, response)
             
@@ -399,14 +479,22 @@ class AssistantOrchestrator:
         Flow:
         1. Wait for wake word
         2. Listen to user
-        3. Process input
-        4. Speak response
-        5. Resume audio
-        6. Repeat
+        3. **[NEW] Retrieve memory context**
+        4. Process input
+        5. **[NEW] Store conversation**
+        6. Speak response
+        7. Resume audio
+        8. Repeat
         """
         logger.info("Starting assistant loop...")
         print("[START] Assistant loop starting...")
         sys.stdout.flush()
+        
+        # NEW: Display memory stats at startup
+        if self.memory:
+            stats = self.memory.get_stats()
+            print(f"[MEMORY] Loaded: {stats['sql']['total_facts']} facts, "
+                  f"{stats['sql']['total_conversations']} conversations")
         
         while True:
             try:
@@ -424,7 +512,7 @@ class AssistantOrchestrator:
                     self._resume_all_audio()
                     continue
                 
-                # Process
+                # Process (includes memory retrieval and storage)
                 response = await self.process_user_input(user_input)
                 
                 # Respond
@@ -451,6 +539,11 @@ class AssistantOrchestrator:
         """Interactive console mode (text input, text output)"""
         print("Text mode. Type 'exit' to quit.")
         
+        # NEW: Show memory stats
+        if self.memory:
+            stats = self.memory.get_stats()
+            print(f"Memory: {stats['sql']['total_facts']} facts loaded\n")
+        
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
         
@@ -471,8 +564,13 @@ class AssistantOrchestrator:
                     
                     if not user_input.strip():
                         continue
+                    
+                    # NEW: Special memory commands
+                    if user_input.lower().startswith("memory:"):
+                        await self._handle_memory_command(user_input[7:].strip())
+                        continue
                         
-                    # Process without STT/TTS
+                    # Process with memory
                     response = await self.process_user_input(user_input)
                     print(f"\nAssistant: {response}\n")
                     
@@ -481,6 +579,40 @@ class AssistantOrchestrator:
                     break
                 except Exception as e:
                     print(f"\nError: {e}\n")
+    
+    async def _handle_memory_command(self, command: str):
+        """Handle special memory commands"""
+        if not self.memory:
+            print("Memory system not available")
+            return
+        
+        command_lower = command.lower()
+        
+        if command_lower in ["stats", "status"]:
+            stats = self.memory.get_stats()
+            print(f"\n📊 Memory Stats:")
+            print(f"  Conversations: {stats['sql']['total_conversations']}")
+            print(f"  Facts: {stats['sql']['total_facts']}")
+            print(f"  Tokens: {stats['sql']['total_tokens']:,}")
+            print(f"  Cost: ${stats['sql']['estimated_cost_usd']:.4f}")
+            if 'vector' in stats:
+                print(f"  Embeddings: {stats['vector']['total_embeddings']}")
+        
+        elif command_lower.startswith("search "):
+            query = command[7:].strip()
+            results = await self.memory.retrieve_context(query, max_results=5)
+            print(f"\n🔍 Found {len(results)} results:")
+            for i, result in enumerate(results, 1):
+                print(f"  {i}. [{result.relevance_score:.2f}] {result.content[:100]}...")
+        
+        elif command_lower == "facts":
+            facts = self.memory.get_user_facts(limit=20)
+            print(f"\n📚 User Facts ({len(facts)}):")
+            for fact in facts:
+                print(f"  • [{fact.category.value if fact.category else 'unknown'}] {fact.content}")
+        
+        else:
+            print("Memory commands: stats, search <query>, facts")
     
     async def run_voice_to_text_loop(self):
         """Voice input, text output mode"""
@@ -504,7 +636,7 @@ class AssistantOrchestrator:
                     self._resume_all_audio()
                     continue
                 
-                # Process
+                # Process (with memory)
                 response = await self.process_user_input(user_input)
                 
                 # Respond with text only (no TTS)
@@ -553,7 +685,7 @@ class AssistantOrchestrator:
                     # Pause any playing audio
                     self._pause_all_audio()
                     
-                    # Process
+                    # Process (with memory)
                     response = await self.process_user_input(user_input)
                     
                     # Speak response
@@ -572,13 +704,21 @@ class AssistantOrchestrator:
     
     def get_status(self) -> dict:
         """Get status of all modules"""
-        return {
+        status = {
             'wake_word': self.wake_word is not None,
             'stt': self.stt is not None,
             'tts': self.tts is not None,
             'intent': self.intent is not None,
-            'actions': len(self.actions.list_actions()) if self.actions else 0
+            'actions': len(self.actions.list_actions()) if self.actions else 0,
+            'memory': self.memory is not None  # NEW
         }
+        
+        # NEW: Add memory stats if available
+        if self.memory:
+            memory_stats = self.memory.get_stats()
+            status['memory_stats'] = memory_stats
+        
+        return status
     
     async def run_headless(self):
         """Headless mode for automation/API"""
