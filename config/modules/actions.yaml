@@ -6,33 +6,45 @@ categories:
   productivity: true
   system: true
   conversation: true
+  entertainment: true  # Added for music
 
 # Home Automation Actions
 home_automation:
   lights:
-    enabled: true
+    enabled: false  # Disabled - use n8n integration instead
     provider: "hue"  # hue, homeassistant, mqtt
     intents:
       - "turn on light"
       - "turn off light"
       - "dim light"
+    note: "Use n8n webhook for Home Assistant integration"
   
   thermostat:
-    enabled: false
+    enabled: false  # Use n8n
     provider: "nest"
+    note: "Use n8n webhook for thermostat control"
 
 # Productivity Actions
 productivity:
+  # n8n Integration (NEW!)
+  n8n:
+    enabled: true
+    description: "Route commands to n8n workflows"
+    config_file: "config/modules/n8n.yaml"
+    note: "Handles email, calendar, Slack, GitHub, etc. via n8n"
+  
   email:
-    enabled: false  # Enable when ready
+    enabled: false  # Replaced by n8n
+    note: "Use n8n webhook for email (Gmail, Outlook, etc.)"
     requires_confirmation: true
     smtp_config:
       host: null
       port: 587
       use_tls: true
-    
+  
   todo:
-    enabled: false
+    enabled: false  # Use n8n
+    note: "Use n8n webhook for Todoist/ClickUp/Asana integration"
     storage: "data/todos.json"
     intents:
       - "add todo"
@@ -42,14 +54,14 @@ productivity:
 # System Actions
 system:
   volume:
-    enabled: true
+    enabled: true  # Keep local control
     step: 10  # Percentage
     intents:
       - "volume up"
       - "volume down"
   
   apps:
-    enabled: true
+    enabled: true  # Keep local control
     allowed_apps:
       - chrome
       - firefox
@@ -58,10 +70,63 @@ system:
       - "open {app}"
       - "launch {app}"
 
+# Entertainment Actions
+entertainment:
+  music:
+    enabled: true  # Keep local control
+    note: "Local music playback with YouTube support"
+
 # Conversation Actions
 conversation:
   ai_chat:
-    enabled: true
+    enabled: true  # Keep local
     model: "gpt-4o-mini"
     personality: "witty"  # witty, professional, friendly
     temperature: 0.7
+  
+  web_search:
+    enabled: true  # Keep local
+    provider: "brave"  # brave, google
+    note: "Uses Brave Search API for web queries"
+
+# ============================================
+# n8n Integration Strategy
+# ============================================
+# 
+# Actions handled by n8n (via webhooks):
+#   ✅ Email (Gmail, Outlook)
+#   ✅ Calendar (Google Calendar, Outlook)
+#   ✅ Slack/Discord notifications
+#   ✅ GitHub (issues, PRs)
+#   ✅ Note taking (Notion, Evernote)
+#   ✅ Task management (Todoist, ClickUp, Asana)
+#   ✅ Google Sheets logging
+#   ✅ Home automation (Home Assistant)
+#   ✅ Custom workflows
+#
+# Actions kept local (in Python):
+#   ✅ Music playback (with YouTube)
+#   ✅ System volume control
+#   ✅ Launch apps
+#   ✅ AI chat
+#   ✅ Web search
+#
+# Why this split?
+#   - Local: Fast, no network needed, real-time
+#   - n8n: External services, complex workflows, visual editing
+#
+# ============================================
+
+# Migration Notes
+# ===============
+# Old email action → n8n webhook
+# Old todo action → n8n webhook (Todoist/ClickUp)
+# Old lights action → n8n webhook (Home Assistant)
+# 
+# Setup n8n workflows:
+# 1. Create workflow in n8n with webhook trigger
+# 2. Add action nodes (Gmail, Calendar, etc.)
+# 3. Copy webhook path
+# 4. Add to config/modules/n8n.yaml
+#
+# See: N8N_SETUP_GUIDE.md for detailed instructions
