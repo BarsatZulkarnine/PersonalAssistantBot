@@ -1,519 +1,344 @@
-# 🏗️ Voice Assistant - Refactored Modular Architecture
+# 🎙️ Modular Voice Assistant
 
-## 🎯 Design Philosophy
+A fully modular, extensible voice assistant with intelligent memory, document search (RAG), and n8n workflow integration.
 
-**True Modularity**: Every component is independent and swappable without touching other code.
-
-### Core Principles
-
-1. **Independence** - Modules don't depend on each other's implementation
-2. **Swappability** - Change providers via config, not code
-3. **Clear Interfaces** - Each module has a well-defined interface
-4. **Configuration-Driven** - Behavior controlled by YAML files
-5. **Category-Based** - Actions organized by purpose
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## 📐 Architecture Overview
+## ✨ Key Features
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   Orchestrator                       │
-│          (Coordinates all modules)                   │
-└──────────────┬──────────────────────────────────────┘
-               │
-     ┌─────────┴─────────┐
-     │   Module Loader    │  ← Loads modules dynamically
-     └─────────┬──────────┘     based on config
-               │
-    ┌──────────┴──────────┐
-    │                     │
-┌───▼────┐  ┌───▼────┐  ┌▼──────┐  ┌─▼────┐  ┌─▼─────┐
-│ Wake   │  │  STT   │  │  TTS  │  │Intent│  │Actions│
-│ Word   │  │        │  │       │  │      │  │       │
-└───┬────┘  └───┬────┘  └┬──────┘  └─┬────┘  └─┬─────┘
-    │           │         │           │         │
-┌───▼────┐  ┌───▼────┐  ┌▼──────┐  ┌─▼────┐  ┌─▼─────┐
-│Vosk/   │  │Google/ │  │gTTS/  │  │Simple│  │ Home  │
-│Porcupine│  │Whisper│  │Eleven │  │ AI   │  │ Auto  │
-└────────┘  └────────┘  └───────┘  └──────┘  └───────┘
-  (Choose)    (Choose)    (Choose)  (Choose)  (Categories)
-```
+### 🧠 **Intelligent Memory System**
+- Remembers personal information, preferences, and past conversations
+- Hybrid SQL + Vector storage for semantic recall
+- Automatic classification of important information
+- **Cost**: ~$1/month for 1000 conversations
 
----
+### 📚 **Document Search (RAG)**
+- Search your personal documents (PDF, DOCX, TXT, Markdown, HTML)
+- Semantic understanding of document content
+- Completely local and private
+- Smart chunking preserves context
 
-## 📂 New File Structure
+### 🔗 **n8n Workflow Integration**
+- Connect to 100+ services (Gmail, Slack, GitHub, etc.)
+- Visual workflow editor
+- No code required
+- Self-hosted and private
 
-```
-assistant/
-├── config/                         # All configuration
-│   ├── settings.yaml              # Global settings
-│   └── modules/                   # Module configs
-│       ├── wake_word.yaml         # Wake word settings
-│       ├── stt.yaml               # STT settings
-│       ├── tts.yaml               # TTS settings
-│       ├── intent.yaml            # Intent detection
-│       └── actions.yaml           # Actions config
-│
-├── modules/                        # Independent modules
-│   ├── wake_word/                 # 🎤 Wake word detection
-│   │   ├── base.py               # Interface
-│   │   ├── vosk.py               # Vosk implementation
-│   │   └── porcupine.py          # Porcupine implementation
-│   │
-│   ├── stt/                       # 🎧 Speech-to-Text
-│   │   ├── base.py               # Interface
-│   │   ├── google.py             # Google STT
-│   │   ├── whisper.py            # Whisper (local)
-│   │   └── azure.py              # Azure STT
-│   │
-│   ├── tts/                       # 🔊 Text-to-Speech
-│   │   ├── base.py               # Interface
-│   │   ├── gtts.py               # Google TTS
-│   │   ├── elevenlabs.py         # ElevenLabs
-│   │   └── piper.py              # Piper (local)
-│   │
-│   ├── intent/                    # 🎯 Intent Detection
-│   │   ├── base.py               # Interface
-│   │   ├── simple_ai.py          # Simple (AI/Web/Action)
-│   │   └── advanced.py           # Advanced (with params)
-│   │
-│   ├── actions/                   # ⚡ Actions
-│   │   ├── base.py               # Base action class
-│   │   ├── registry.py           # Action registry
-│   │   │
-│   │   ├── home_automation/      # 🏠 Smart home
-│   │   │   ├── lights.py
-│   │   │   └── thermostat.py
-│   │   │
-│   │   ├── productivity/         # 📝 Productivity
-│   │   │   ├── email.py
-│   │   │   ├── todo.py
-│   │   │   └── calendar.py
-│   │   │
-│   │   ├── system/               # 💻 System control
-│   │   │   ├── volume.py
-│   │   │   └── apps.py
-│   │   │
-│   │   └── conversation/         # 💬 Chat
-│   │       └── ai_chat.py
-│   │
-│   ├── rag/                       # 🧠 RAG system
-│   │   ├── vector_store.py
-│   │   ├── retriever.py
-│   │   └── indexer.py
-│   │
-│   └── security/                  # 🔒 Security
-│       ├── confirmation.py
-│       └── permissions.py
-│
-├── core/                          # Core coordination
-│   ├── orchestrator.py           # Main coordinator
-│   ├── module_loader.py          # Dynamic loading
-│   └── pipeline.py               # Request pipeline
-│
-├── utils/                         # Utilities
-│   ├── config.py                 # Config management
-│   └── logger.py                 # Logging
-│
-├── data/                          # Data storage
-├── logs/                          # Log files
-├── main.py                       # Entry point
-└── requirements.txt
-```
+### 🎤 **Modular Architecture**
+- Swap any component without code changes
+- Choose your providers via config files
+- Easy to extend with new actions
+- Clean separation of concerns
 
 ---
 
-## 🔌 Module System
+## 🚀 Quick Start
 
-### How Modules Work
-
-Each module:
-1. **Has an interface** (base.py) - Defines contract
-2. **Has implementations** - Different providers
-3. **Has config** - In `config/modules/`
-4. **Is loaded dynamically** - By ModuleLoader
-
-### Switching Providers
-
-**Change STT from Google to Whisper:**
-
-Edit `config/modules/stt.yaml`:
-```yaml
-provider: "whisper"  # Changed from "google"
-```
-
-That's it! No code changes needed.
-
----
-
-## 🎤 Module 1: Wake Word Detection
-
-### Purpose
-Efficiently detect wake word without consuming resources.
-
-### Interface
-```python
-class WakeWordDetector(ABC):
-    def start()  # Start listening
-    def stop()   # Stop listening
-    def wait_for_wake_word() -> bool  # Block until detected
-    def get_resource_usage() -> dict  # Check CPU/memory
-```
-
-### Implementations
-- **Vosk** - Offline, accurate, medium resources
-- **Porcupine** - Very efficient, customizable wake words
-
-### Configuration
-```yaml
-# config/modules/wake_word.yaml
-provider: "vosk"
-wake_word: "hey pi"
-sensitivity: 0.5
-low_power_mode: true
-```
-
----
-
-## 🎧 Module 2: Speech-to-Text
-
-### Purpose
-Record and transcribe user speech with configurable duration.
-
-### Interface
-```python
-class STTProvider(ABC):
-    def listen() -> STTResult  # Record and transcribe
-    def set_recording_duration(float)  # Adjust max duration
-    def set_pause_threshold(float)  # Silence detection
-    def adjust_for_ambient_noise()  # Calibrate
-```
-
-### Implementations
-- **Google** - Cloud-based, accurate, requires internet
-- **Whisper** - Local, very accurate, requires GPU
-- **Azure** - Cloud-based, enterprise features
-
-### Configuration
-```yaml
-# config/modules/stt.yaml
-provider: "google"
-recording:
-  timeout: 5              # Max wait for speech
-  phrase_time_limit: 15   # Max recording duration
-  pause_threshold: 0.8    # Silence to stop
-  energy_threshold: 300   # Voice detection
-language: "en-US"
-```
-
----
-
-## 🔊 Module 3: Text-to-Speech
-
-### Purpose
-Convert text to speech with customizable voices.
-
-### Interface
-```python
-class TTSProvider(ABC):
-    def speak(text) -> bool  # Blocking speech
-    def speak_async(text)    # Non-blocking
-    def stream_speak(text)   # Sentence-by-sentence
-    def list_voices() -> List[str]  # Available voices
-    def set_voice(name)      # Change voice
-```
-
-### Implementations
-- **gTTS** - Free, decent quality, cloud
-- **ElevenLabs** - Premium, best quality, paid
-- **Piper** - Local, fast, offline
-
-### Configuration
-```yaml
-# config/modules/tts.yaml
-provider: "gtts"
-language: "en"
-speed: 1.0
-streaming:
-  enabled: true
-voice:
-  gender: "neutral"
-```
-
----
-
-## 🎯 Module 4: Intent Detection
-
-### Purpose
-Classify user input into categories: AI, Web, or Action.
-
-### Interface
-```python
-class IntentDetector(ABC):
-    async def detect(text) -> IntentResult
-    # Returns: IntentType (AI, WEB, ACTION)
-```
-
-### Implementations
-- **Simple AI** - Uses GPT to classify into 3 categories
-- **Advanced** - Extracts parameters, multi-intent
-
-### Configuration
-```yaml
-# config/modules/intent.yaml
-provider: "simple_ai"
-simple_ai:
-  model: "gpt-4o-mini"
-  temperature: 0.3
-  categories:
-    - "AI"      # Conversation
-    - "Web"     # Search
-    - "Action"  # Execute
-```
-
----
-
-## ⚡ Module 5: Actions
-
-### Purpose
-Execute user commands, organized by category.
-
-### Categories
-
-#### 🏠 Home Automation
-- Lights, thermostat, locks, etc.
-- Integrates with Hue, Home Assistant, MQTT
-
-#### 📝 Productivity  
-- Email, todo, calendar
-- Requires confirmation for sensitive actions
-
-#### 💻 System
-- Volume, apps, window management
-- Cross-platform support
-
-#### 💬 Conversation
-- General AI chat
-- Fallback for unmatched intents
-
-### Adding New Action
-
-Create `modules/actions/<category>/<action>.py`:
-
-```python
-from modules.actions.base import Action, ActionResult, ActionCategory
-
-class MyAction(Action):
-    def __init__(self):
-        super().__init__()
-        self.category = ActionCategory.HOME_AUTOMATION
-    
-    def get_intents(self):
-        return ["my trigger phrase"]
-    
-    async def execute(self, prompt, params=None):
-        # Your code here
-        return ActionResult(success=True, message="Done!")
-```
-
-**Auto-discovered!** No registration needed.
-
----
-
-## 🔧 Configuration System
-
-### Three Levels
-
-1. **Global Settings** - `config/settings.yaml`
-   - App name, version, debug mode
-   - Logging configuration
-
-2. **Module Configs** - `config/modules/*.yaml`
-   - Each module has its own config
-   - Provider selection
-   - Module-specific settings
-
-3. **Action Configs** - `config/modules/actions.yaml`
-   - Which actions enabled
-   - Category settings
-   - Integration details
-
-### Example: Switching Everything to Local
-
-```yaml
-# wake_word.yaml
-provider: "vosk"  # Offline
-
-# stt.yaml
-provider: "whisper"  # Local
-
-# tts.yaml
-provider: "piper"  # Local
-
-# intent.yaml
-provider: "rule_based"  # No API calls
-```
-
-Now runs **completely offline**!
-
----
-
-## 🚀 Getting Started
-
-### 1. Install
+### 1. Installation
 
 ```bash
+# Clone repository
+git clone https://github.com/yourusername/voice-assistant.git
+cd voice-assistant
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure
+### 2. Configuration
 
-Create config files in `config/modules/`:
-- Copy templates from artifacts
-- Edit provider selections
-- Adjust settings
+```bash
+# Copy environment template
+cp .env.example .env
+
+# Add your OpenAI API key (required)
+echo "OPENAI_API_KEY=sk-your-key-here" >> .env
+```
 
 ### 3. Run
 
 ```bash
-python main.py
-```
+# Voice mode (voice input + voice output)
+python main.py --mode voice
 
-### 4. Test Module Loading
+# Text mode (text input + text output)
+python main.py --mode text
 
-```bash
-python -c "from core.module_loader import get_module_loader; loader = get_module_loader(); print(loader.list_available_providers('stt'))"
+# Mixed modes
+python main.py --input voice --output text  # Voice input, text output
+python main.py --input text --output voice  # Text input, voice output
 ```
 
 ---
 
-## 🎨 Customization Examples
+## 📋 What's Included
 
-### Example 1: Use Whisper for Better Accuracy
+### Core Modules
 
+| Module | Purpose | Swappable Providers |
+|--------|---------|-------------------|
+| **Wake Word** | Detect activation phrase | Simple (Google), Vosk, Porcupine |
+| **STT** | Speech-to-Text | Google ✅, Whisper, Azure |
+| **TTS** | Text-to-Speech | gTTS, OpenAI ✅, ElevenLabs, Piper |
+| **Intent** | Classify user requests | Simple AI ✅, Advanced |
+| **Actions** | Execute commands | See Actions below |
+| **Memory** | Remember conversations | SQL + ChromaDB ✅ |
+| **RAG** | Search documents | Hybrid retrieval ✅ |
+
+✅ = Currently active (see `config/modules/`)
+
+### Actions by Category
+
+**🏠 Home Automation** (via n8n)
+- Smart lights, thermostats, locks
+- Integrates with Home Assistant
+
+**📝 Productivity** (via n8n)
+- Email (Gmail, Outlook)
+- Calendar (Google, Outlook)
+- Notes (Joplin, Notion)
+- Tasks (Todoist, ClickUp, Asana)
+- Slack/Discord notifications
+- GitHub issues
+
+**💻 System Control** (local)
+- Volume control
+- Launch applications
+
+**🎵 Entertainment** (local)
+- Music playback with YouTube support
+- Auto-pause for voice commands
+
+**💬 Conversation** (local)
+- AI chat with memory context
+- Web search (Brave API)
+
+---
+
+## 🎯 Usage Examples
+
+### Basic Conversation
+```
+You: "Hey Pi"
+Assistant: "Yes?"
+You: "My name is Alice and I live in Melbourne"
+Assistant: "Nice to meet you, Alice!"
+
+[Later...]
+You: "Hey Pi"
+Assistant: "Yes?"
+You: "What's my name?"
+Assistant: "Your name is Alice!"
+```
+
+### Document Search
+```
+You: "Hey Pi"
+Assistant: "Yes?"
+You: "What does my Python guide say about decorators?"
+Assistant: "Based on your Python guide, decorators allow you to..."
+```
+
+### n8n Workflows
+```
+You: "Hey Pi"
+Assistant: "Yes?"
+You: "Send an email to John about the meeting"
+Assistant: "Email sent to john@example.com"
+```
+
+### Music Control
+```
+You: "Hey Pi, play some jazz"
+Assistant: "Now playing: Take Five by Dave Brubeck"
+
+[Music auto-pauses when you say "Hey Pi"]
+You: "Hey Pi, what's the weather?"
+Assistant: "It's 22°C and sunny..."
+[Music auto-resumes after response]
+```
+
+---
+
+## 📚 Documentation
+
+### Getting Started
+- **[Installation Guide](docs/INSTALLATION.md)** - Detailed setup instructions
+- **[Configuration Guide](docs/CONFIGURATION.md)** - Configure all modules
+- **[Quick Start Examples](docs/QUICK_START.md)** - Common usage patterns
+
+### Core Systems
+- **[Memory System](docs/MEMORY_SYSTEM.md)** - How intelligent memory works
+- **[RAG System](docs/RAG_SYSTEM.md)** - Document search explained
+- **[n8n Integration](docs/N8N_INTEGRATION.md)** - Connect external services
+
+### Module Documentation
+- **[Wake Word Detection](docs/modules/WAKE_WORD.md)** - Activation phrase detection
+- **[Speech-to-Text](docs/modules/STT.md)** - Voice recognition
+- **[Text-to-Speech](docs/modules/TTS.md)** - Voice synthesis
+- **[Intent Detection](docs/modules/INTENT.md)** - Understanding requests
+- **[Actions System](docs/modules/ACTIONS.md)** - Extensible commands
+
+### Development
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design
+- **[Adding Actions](docs/dev/ADDING_ACTIONS.md)** - Create custom commands
+- **[Adding Providers](docs/dev/ADDING_PROVIDERS.md)** - New STT/TTS providers
+- **[API Reference](docs/dev/API_REFERENCE.md)** - Code documentation
+
+### Deployment
+- **[Raspberry Pi Setup](docs/deployment/RASPBERRY_PI.md)** - Deploy on Pi
+- **[Docker Deployment](docs/deployment/DOCKER.md)** - Container deployment
+- **[Headless Mode](docs/deployment/HEADLESS.md)** - Run without display
+
+### Troubleshooting
+- **[Common Issues](docs/TROUBLESHOOTING.md)** - Solutions to common problems
+- **[FAQ](docs/FAQ.md)** - Frequently asked questions
+
+---
+
+## 🎨 Configuration Examples
+
+### Switch to Whisper STT
 ```yaml
 # config/modules/stt.yaml
 provider: "whisper"
 whisper:
-  model_size: "base"  # tiny, base, small, medium, large
-  device: "cuda"      # or "cpu"
+  model_size: "base"
+  device: "cuda"  # or "cpu"
 ```
 
-### Example 2: Premium Voice with ElevenLabs
-
+### Use ElevenLabs TTS
 ```yaml
 # config/modules/tts.yaml
 provider: "elevenlabs"
 elevenlabs:
   api_key: "your_key"
   voice_id: "specific_voice"
-  stability: 0.5
 ```
 
-### Example 3: Longer Recording Time
-
+### Enable More Actions
 ```yaml
-# config/modules/stt.yaml
-recording:
-  phrase_time_limit: 30  # 30 seconds instead of 15
-  pause_threshold: 1.5   # Wait longer for pauses
+# config/modules/actions.yaml
+productivity:
+  n8n:
+    enabled: true
+    
+entertainment:
+  music:
+    enabled: true
 ```
 
 ---
 
-## 🔄 Migration from v3.0
+## 💰 Cost Breakdown
 
-### Changes Required
+| Component | Provider | Cost |
+|-----------|----------|------|
+| **STT** | Google (free tier) | $0/month |
+| **TTS** | OpenAI | ~$2/month |
+| **AI Chat** | OpenAI (gpt-4o-mini) | ~$1/month |
+| **Memory Classification** | OpenAI | ~$1/month |
+| **Memory Storage** | Local (SQLite + ChromaDB) | $0 |
+| **RAG** | Local (embeddings) | $0 |
+| **n8n** | Self-hosted | $0 |
+| **Web Search** | Brave API (free tier) | $0/month |
+| **Total** | | **~$4/month** |
 
-1. **Reorganize files** to new structure
-2. **Create module configs** in `config/modules/`
-3. **Update imports** to use new paths
-4. **Test each module** independently
-
-### Benefits
-
-- ✅ Swap providers without code changes
-- ✅ Test modules independently
-- ✅ Clear separation of concerns
-- ✅ Easy to add new implementations
-- ✅ Configuration-driven behavior
-
----
-
-## 📊 Module Status
-
-| Module | Interface | Implementations | Config | Status |
-|--------|-----------|----------------|---------|--------|
-| Wake Word | ✅ | Simple, Vosk | ✅ | ⚠️ Vosk WIP |
-| STT | ✅ | Google | ✅ | ✅ Done |
-| TTS | ✅ | GTTS | ✅ | ✅ Done |
-| Intent | ✅ | Simple AI | ✅ | ✅ Done |
-| Actions | ✅ | All Categories | ✅ | ⚠️ Some WIP |
+*Based on moderate usage (1000 conversations/month)*
 
 ---
 
-## 🎯 Next Steps
+## 🛠️ Technology Stack
 
-1. **Implement remaining providers**
-   - Wake word detectors
-   - TTS providers
-   - Action categories
+- **Python 3.10+** - Core language
+- **OpenAI API** - AI processing
+- **SpeechRecognition** - Voice input
+- **pygame** - Audio playback
+- **SQLite** - Structured data storage
+- **ChromaDB** - Vector embeddings
+- **n8n** - Workflow automation
+- **yt-dlp** - YouTube music support
 
-2. **Add RAG module**
-   - Vector store
-   - Retrieval
-   - Indexing
+---
 
-3. **Add security module**
-   - Confirmation flows
-   - Permissions
-   - Auth
+## 📊 System Requirements
 
-4. **Test and optimize**
-   - Resource usage
-   - Latency
-   - Accuracy
+### Minimum
+- Python 3.10+
+- 2GB RAM
+- Microphone (for voice input)
+- Speaker (for voice output)
+- Internet connection
+
+### Recommended
+- Python 3.11+
+- 4GB RAM
+- USB microphone (better quality)
+- Dedicated speaker/headphones
+- Fast internet connection
+
+### Optional
+- NVIDIA GPU (for Whisper STT)
+- Raspberry Pi 4 (for deployment)
 
 ---
 
 ## 🤝 Contributing
 
-### Adding a New Provider
+Contributions are welcome! Please read our [Contributing Guide](docs/CONTRIBUTING.md) first.
 
-1. Create `modules/<type>/<provider>.py`
-2. Inherit from `<Type>Provider` base class
-3. Implement required methods
-4. Add config to `config/modules/<type>.yaml`
-5. Test: `provider: "your_provider"`
-
-### Adding a New Action
-
-1. Create `modules/actions/<category>/<action>.py`
-2. Inherit from `Action`
-3. Set category
-4. Implement `get_intents()` and `execute()`
-5. Auto-discovered!
+### Areas for Contribution
+- New action implementations
+- Additional STT/TTS providers
+- Improved wake word detection
+- Documentation improvements
+- Bug fixes and testing
 
 ---
 
-## 📚 Documentation
+## 📝 License
 
-- **This README** - Architecture overview
-- **Module READMEs** - In each module directory
-- **Config Examples** - In `config/` directory
-- **API Docs** - In `docs/` (coming soon)
+MIT License - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🎉 Key Advantages
+## 🙏 Acknowledgments
 
-1. **True Modularity** - Each module is independent
-2. **Easy Testing** - Test modules in isolation
-3. **Configuration-Driven** - No code changes to switch providers
-4. **Organized** - Actions by category
-5. **Scalable** - Easy to add new implementations
-6. **Clear** - Well-defined interfaces
-7. **Flexible** - Mix and match providers
+- OpenAI for GPT models and TTS
+- Google for Speech Recognition
+- ChromaDB for vector storage
+- n8n for workflow automation
+- All open-source contributors
 
-**This is a professional, maintainable architecture!** 🚀
+---
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/voice-assistant/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/voice-assistant/discussions)
+- **Documentation**: [docs/](docs/)
+
+---
+
+## 🗺️ Roadmap
+
+- [x] Modular architecture
+- [x] Memory system with RAG
+- [x] n8n integration
+- [x] Music playback with YouTube
+- [ ] Multi-user support
+- [ ] Mobile app
+- [ ] Voice training/customization
+- [ ] Plugin marketplace
+- [ ] Cloud sync (optional)
+
+---
+
+**Built with ❤️ for voice-first interaction**

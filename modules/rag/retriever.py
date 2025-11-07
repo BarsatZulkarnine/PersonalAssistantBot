@@ -94,14 +94,16 @@ class HybridRetriever(RAGRetriever):
     
     def _clean_fts_query(self, query: str) -> str:
         """Clean query for FTS search"""
+        if not query or not query.strip():
+            return ""  # Return empty string to skip FTS search
+            
         import re
         # Remove special characters that could cause FTS syntax errors
         query = re.sub(r'[!?.,;:\'"`(){}[\]<>|/\\&^%$#@]', ' ', query)
         # Normalize whitespace
         query = ' '.join(query.split())
-        if not query:
-            return '*'  # Return wildcard if query is empty
-        # Add fuzzy matching
+        
+        # Add fuzzy matching for non-empty queries
         terms = query.split()
         cleaned_terms = []
         for term in terms:
@@ -109,16 +111,23 @@ class HybridRetriever(RAGRetriever):
                 cleaned_terms.append(f'{term}*')
             else:
                 cleaned_terms.append(term)
+        
+        if not cleaned_terms:
+            return ""  # Return empty if no valid terms
+            
         return ' OR '.join(cleaned_terms)
 
     def _fts_search(self, query: str, limit: int = 10) -> List[RAGResult]:
         """Search using SQL FTS5"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
             # Clean and prepare query
             cleaned_query = self._clean_fts_query(query)
+            if not cleaned_query:
+                logger.debug("Empty query - skipping FTS search")
+                return []  # Skip FTS search for empty queries
+                
+            conn = self._get_connection()
+            cursor = conn.cursor()
             
             # Search document chunks via FTS
             cursor.execute("""
