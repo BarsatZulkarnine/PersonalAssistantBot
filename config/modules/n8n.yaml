@@ -2,27 +2,50 @@
 
 # n8n Server Settings
 server:
-  base_url: "http://localhost:5678"  # Your n8n instance URL
-  auth_token: null                    # Optional: n8n API token for authentication
+  base_url: "http://localhost:5678"
+  auth_token: null  # Optional: n8n API token
 
 # Webhook Mappings
-# Map voice commands to n8n webhook workflows
 webhooks:
+  # Test Workflow (REQUIRED)
+  test_n8n:
+    webhook_path: "/webhook-test/ac0a62b1-2305-4176-a743-a1c7a96a541a"
+    description: "Test n8n connection"
+    confirmation: false
+    intents:
+      - "test n8n"
+      - "test webhook"
+      - "check n8n"
+      - "n8n test"
+      - "webhook test"
+      - "check webhook"
+  
+  # Joplin Notes
+  joplin_note:
+    webhook_path: null  # Add your webhook path from n8n
+    description: "Create note in Joplin"
+    confirmation: false
+    intents:
+      - "take note"
+      - "joplin note"
+      - "remember this"
+      - "write down"
+      - "create note"
+      - "add note"
   
   # Email Integration
   send_email:
-    webhook_id: null  # Add your webhook ID from n8n
+    webhook_path: null  # Add your webhook path
     description: "Send email via Gmail/Outlook"
     confirmation: true
     intents:
       - "send email"
       - "email"
       - "send a message to"
-    example: "Send email to John about the meeting"
   
   # Calendar Integration
   add_calendar:
-    webhook_id: null
+    webhook_path: null
     description: "Add event to Google/Outlook Calendar"
     confirmation: true
     intents:
@@ -30,112 +53,57 @@ webhooks:
       - "schedule"
       - "remind me"
       - "create appointment"
-    example: "Schedule meeting with Sarah tomorrow at 2pm"
-  
-  # Note Taking
-  create_note:
-    webhook_id: null
-    description: "Create note in Notion/Evernote/OneNote"
-    confirmation: false
-    intents:
-      - "take note"
-      - "note"
-      - "remember"
-      - "write down"
-    example: "Take note: Buy milk and eggs"
+      - "calendar event"
   
   # Slack Integration
   slack_message:
-    webhook_id: null
+    webhook_path: null
     description: "Send message to Slack channel"
     confirmation: true
     intents:
       - "slack"
       - "message team"
       - "send to slack"
-    example: "Slack the team about the deployment"
+      - "slack the team"
   
   # GitHub Integration
   github_issue:
-    webhook_id: null
+    webhook_path: null
     description: "Create GitHub issue"
     confirmation: true
     intents:
       - "create issue"
       - "github bug"
       - "report bug"
-    example: "Create GitHub issue: Login button not working"
+      - "github issue"
   
   # Google Sheets Logging
   log_sheet:
-    webhook_id: null
+    webhook_path: null
     description: "Log data to Google Sheets"
     confirmation: false
     intents:
       - "log this"
       - "add to spreadsheet"
       - "track"
-    example: "Log 8 hours worked on project X"
+      - "log to sheets"
   
-  # Task Management (Todoist/ClickUp/Asana)
+  # Task Management
   create_task:
-    webhook_id: null
-    description: "Create task in task manager"
+    webhook_path: null
+    description: "Create task in Todoist/ClickUp/Asana"
     confirmation: false
     intents:
       - "create task"
       - "add task"
       - "todo"
-    example: "Create task: Review pull request #123"
-  
-  # Home Assistant (Smart Home)
-  home_automation:
-    webhook_id: null
-    description: "Control Home Assistant devices"
-    confirmation: false
-    intents:
-      - "home assistant"
-      - "smart home"
-      - "control"
-    example: "Turn on living room lights via home assistant"
-  
-  # Custom Automation
-  custom_workflow:
-    webhook_id: null
-    description: "Trigger custom n8n workflow"
-    confirmation: true
-    intents:
-      - "trigger workflow"
-      - "run automation"
-    example: "Trigger workflow backup-database"
+      - "new task"
 
 # Response Format
-# n8n workflows should return this format:
 response_format:
   success: true/false
   message: "Human-readable response"
   data: {}  # Optional additional data
-
-# Examples of n8n Workflow Return Values:
-examples:
-  email_sent:
-    success: true
-    message: "Email sent to john@example.com"
-    data:
-      email_id: "abc123"
-      sent_at: "2025-01-15T10:30:00Z"
-  
-  calendar_added:
-    success: true
-    message: "Event added to calendar on Jan 20 at 2pm"
-    data:
-      event_id: "xyz789"
-      calendar: "primary"
-  
-  error:
-    success: false
-    message: "Failed to send email: Invalid recipient"
-    error: "Detailed error message"
 
 # Security Settings
 security:
@@ -145,10 +113,6 @@ security:
     - github_issue
     - add_calendar
   
-  # IP whitelist (optional)
-  allowed_ips: []
-  
-  # Rate limiting
   max_requests_per_minute: 10
 
 # Logging

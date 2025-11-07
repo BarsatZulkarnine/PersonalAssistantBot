@@ -1,0 +1,214 @@
+# n8n Integration - Quick Start
+
+Integrate your voice assistant with n8n workflows for external services.
+
+## 🚀 5-Minute Setup
+
+### 1. Install & Start n8n
+
+```bash
+# Install
+npm install -g n8n
+
+# Start
+n8n start
+```
+
+Visit: http://localhost:5678
+
+### 2. Create Test Workflow
+
+1. Click **"Add workflow"**
+2. Add **"Webhook"** node:
+   - HTTP Method: `POST`
+   - Path: `/webhook-test/ac0a62b1-2305-4176-a743-a1c7a96a541a`
+3. Add **"Respond to Webhook"** node:
+   - Response Body:
+   ```json
+   {
+     "success": true,
+     "message": "n8n webhook test successful!",
+     "received": "={{$json.user_input}}"
+   }
+   ```
+4. **Connect** nodes: Webhook → Respond
+5. Click **"Save"** and **"Execute workflow"**
+
+### 3. Configure Environment
+
+Add to `.env`:
+
+```bash
+N8N_BASE_URL=http://localhost:5678
+N8N_TEST_WEBHOOK=/webhook-test/ac0a62b1-2305-4176-a743-a1c7a96a541a
+```
+
+### 4. Enable n8n Action
+
+In `config/modules/actions.yaml`:
+
+```yaml
+productivity:
+  n8n:
+    enabled: true  # Change from false to true
+```
+
+### 5. Test It!
+
+```bash
+# Start assistant in text mode
+python main.py --mode text
+
+# Test commands
+> test n8n
+> check webhook
+> n8n test
+```
+
+**Expected Output**: ✅ "n8n webhook test successful!"
+
+---
+
+## 📝 Add Joplin Notes (Example)
+
+### Step 1: Create Joplin Workflow in n8n
+
+1. **Webhook Node**:
+   - Path: `/webhook/joplin-notes`
+
+2. **Joplin Node**:
+   - Operation: `Create a note`
+   - Title: `={{$json.user_input}}`
+   - Body: `={{$json.user_input}}`
+   - Notebook: Select your notebook
+
+3. **Respond Node**:
+   ```json
+   {
+     "success": true,
+     "message": "Note created: {{$json.title}}",
+     "data": {
+       "note_id": "={{$json.id}}"
+     }
+   }
+   ```
+
+### Step 2: Add Configuration
+
+Update `config/modules/n8n.yaml`:
+
+```yaml
+webhooks:
+  joplin_note:
+    webhook_path: "/webhook/joplin-notes"
+    description: "Create note in Joplin"
+    confirmation: false
+    intents:
+      - "take note"
+      - "joplin note"
+      - "remember"
+      - "write down"
+```
+
+### Step 3: Test
+
+```bash
+> take note: Buy milk and eggs
+> joplin note: Meeting tomorrow at 3pm
+> remember: Call dentist on Friday
+```
+
+---
+
+## 🎯 Common Workflows
+
+### Email (Gmail)
+```
+Webhook → OpenAI (extract recipient) → Gmail (send) → Respond
+```
+
+**Voice**: "send email to john about meeting"
+
+### Calendar Event
+```
+Webhook → OpenAI (extract date/time) → Google Calendar (create) → Respond
+```
+
+**Voice**: "add to calendar: Meeting tomorrow at 2pm"
+
+### Task Management
+```
+Webhook → Todoist/ClickUp (create task) → Respond
+```
+
+**Voice**: "create task: Review pull request 123"
+
+### Slack Message
+```
+Webhook → Slack (send message) → Respond
+```
+
+**Voice**: "slack the team about deployment"
+
+---
+
+## 🐛 Troubleshooting
+
+### "No matching n8n workflow found"
+- Check `config/modules/n8n.yaml` intents
+- Ensure action is enabled in `actions.yaml`
+- Try: `> test n8n`
+
+### "Connection refused"
+```bash
+# Check if n8n is running
+curl http://localhost:5678
+
+# Start n8n
+n8n start
+```
+
+### Webhook returns 404
+- Copy exact webhook path from n8n
+- Update `webhook_path` in config
+- Make sure workflow is **active** (toggle on)
+
+### Check Logs
+```bash
+tail -f logs/assistant.log | grep n8n
+```
+
+---
+
+## 📚 Full Documentation
+
+See [N8N_SETUP_GUIDE.md](N8N_SETUP_GUIDE.md) for:
+- Detailed setup instructions
+- All available workflows
+- Security configuration
+- Advanced features
+- Best practices
+
+---
+
+## 🔗 Quick Links
+
+- **n8n Docs**: https://docs.n8n.io
+- **n8n Community**: https://community.n8n.io
+- **Joplin API**: https://joplinapp.org/api/references/rest_api/
+- **Voice Assistant Docs**: See `docs/` folder
+
+---
+
+## ✅ Checklist
+
+- [ ] n8n installed and running
+- [ ] Test workflow created
+- [ ] `.env` configured with webhook path
+- [ ] n8n action enabled in `actions.yaml`
+- [ ] Test command successful
+- [ ] Ready to create custom workflows!
+
+---
+
+**Next Steps**: Create your first real workflow (Joplin, Email, Calendar, etc.)
