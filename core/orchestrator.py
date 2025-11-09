@@ -1,12 +1,12 @@
 """
-Main Orchestrator - WITH MEMORY + RAG INTEGRATION
+Main Orchestrator - REFACTORED WITH SERVICE + WEB SEARCH FIX
 
-Coordinates all modules to handle user interactions.
-NOW INCLUDES: Intelligent memory storage/retrieval + Document search!
+Coordinates modules but business logic moved to ConversationService.
+Now acts as "glue code" between I/O and business logic.
+
+FIXED: Web searches now have memory context and are stored in sessions.
 """
-
 from pathlib import Path
-
 import sys
 import time
 from typing import Optional
@@ -14,10 +14,13 @@ from core.module_loader import get_module_loader
 from modules.wake_word.base import WakeWordDetector
 from modules.stt.base import STTProvider
 from modules.tts.base import TTSProvider
-from modules.intent.base import IntentDetector, IntentType
+from modules.intent.base import IntentDetector
 from modules.actions.registry import ActionRegistry
 from utils.logger import get_logger
 import asyncio
+
+# NEW: Import the service
+from core.services.conversation_service import ConversationService
 
 # Memory system
 from modules.memory import get_memory_manager, MemoryManager
@@ -31,21 +34,20 @@ class AssistantOrchestrator:
     """
     Main coordinator for the voice assistant.
     
-    Manages the complete flow:
-    1. Wake word detection
-    2. Speech recording & transcription
-    3. **[MEMORY] Retrieve relevant memory context**
-    4. **[RAG] Search personal documents**
-    5. Intent detection
-    6. Action execution or AI response (with full context)
-    7. **[MEMORY] Store conversation**
-    8. Text-to-speech response
+    SIMPLIFIED (Refactored):
+    - I/O handling (wake word, STT, TTS)
+    - Service initialization
+    - Mode routing (voice, text, headless)
+    
+    Business logic moved to ConversationService.
+    
+    FIXED: All interactions (web, action, AI) are now stored in sessions.
     """
     
     def __init__(self):
         self.loader = get_module_loader()
         
-        # Load modules
+        # Load modules (I/O components)
         self.wake_word: Optional[WakeWordDetector] = None
         self.stt: Optional[STTProvider] = None
         self.tts: Optional[TTSProvider] = None
@@ -55,8 +57,11 @@ class AssistantOrchestrator:
         # Memory system
         self.memory: Optional[MemoryManager] = None
         
-        # RAG system (NEW!)
+        # RAG system
         self.rag: Optional[HybridRetriever] = None
+        
+        # NEW: The business logic service (handles web search memory fix)
+        self.conversation_service: Optional[ConversationService] = None
         
         # Music player reference (for auto-pause)
         self.music_player = None
@@ -64,7 +69,7 @@ class AssistantOrchestrator:
         self._initialize_modules()
     
     def _initialize_modules(self):
-        """Load all modules based on configuration"""
+        """Load all modules and initialize service"""
         try:
             logger.info("Initializing modules...")
             
@@ -145,7 +150,7 @@ class AssistantOrchestrator:
                 sys.stdout.flush()
                 self.memory = None
             
-            # NEW: Load RAG system
+            # Load RAG system
             try:
                 self.rag = get_retriever()
                 logger.info("RAG system initialized")
@@ -156,6 +161,23 @@ class AssistantOrchestrator:
                 print(f"[WARN] RAG disabled: {e}")
                 sys.stdout.flush()
                 self.rag = None
+            
+            # NEW: Initialize ConversationService (handles web search memory fix)
+            try:
+                self.conversation_service = ConversationService(
+                    intent_detector=self.intent,
+                    action_registry=self.actions,
+                    memory_manager=self.memory,
+                    rag_retriever=self.rag
+                )
+                logger.info("ConversationService initialized (web search memory enabled)")
+                print(f"[OK] ConversationService: Business logic ready (web+memory fixed)")
+                sys.stdout.flush()
+            except Exception as e:
+                logger.error(f"ConversationService failed: {e}")
+                print(f"[FAIL] ConversationService failed: {e}")
+                sys.stdout.flush()
+                raise
             
             logger.info("All modules initialized successfully!")
             print("[OK] All modules initialized!")
@@ -204,7 +226,6 @@ class AssistantOrchestrator:
     
     def _resume_all_audio(self):
         """Resume paused audio outputs"""
-        # Resume music if it was auto-paused
         if self.music_player:
             try:
                 if self.music_player.auto_resume():
@@ -225,7 +246,6 @@ class AssistantOrchestrator:
             detected = self.wake_word.wait_for_wake_word()
             self.wake_word.stop()
             
-            # Pause all audio when wake word detected
             if detected:
                 self._pause_all_audio()
             
@@ -233,7 +253,7 @@ class AssistantOrchestrator:
         except Exception as e:
             logger.error(f"Wake word error: {e}")
             print(f"⚠️  Wake word error: {e}")
-            return True  # Continue anyway
+            return True
     
     def listen_to_user(self) -> str:
         """Record and transcribe user speech"""
@@ -251,124 +271,6 @@ class AssistantOrchestrator:
         sys.stdout.flush()
         return result.text
     
-    async def detect_intent(self, text: str) -> IntentType:
-        """Detect user intent from text"""
-        logger.debug(f"Detecting intent for: {text}")
-        print(f"[INTENT] Classifying...")
-        sys.stdout.flush()
-        result = await self.intent.detect(text)
-        
-        logger.info(
-            f"Intent: {result.intent_type.value} "
-            f"(confidence: {result.confidence:.2f})"
-        )
-        print(f"[INTENT] {result.intent_type.value} (conf: {result.confidence:.2f})")
-        sys.stdout.flush()
-        
-        return result.intent_type
-    
-    async def handle_action(self, text: str) -> str:
-        """Handle action execution"""
-        logger.debug(f"Executing action for: {text}")
-        print(f"[ACTION] Finding action...")
-        sys.stdout.flush()
-        
-        # Find matching action
-        action = self.actions.find_action_for_prompt(text)
-        
-        if not action:
-            logger.warning("No matching action found")
-            print("[WARN] No matching action")
-            return "I'm not sure how to do that."
-        
-        # Execute
-        print(f"[ACTION] Executing: {action.name}")
-        sys.stdout.flush()
-        result = await action.execute(text)
-        
-        if result.success:
-            logger.info(f"Action completed: {action.name}")
-            print(f"[OK] Action completed")
-        else:
-            logger.warning(f"Action failed: {result.message}")
-            print(f"[FAIL] {result.message}")
-        
-        sys.stdout.flush()
-        return result.message
-    
-    async def handle_web_search(self, text: str) -> str:
-        """Handle web search request"""
-        logger.debug(f"Web search for: {text}")
-        print(f"[WEB] Searching for: {text}")
-        sys.stdout.flush()
-        
-        # Find web search action
-        web_action = None
-        for action in self.actions.get_all_actions().values():
-            if action.name == "WebSearchAction":
-                web_action = action
-                break
-        
-        if web_action:
-            result = await web_action.execute(text)
-            return result.message
-        
-        logger.warning("Web search action not found")
-        print("[WARN] Web search action not available")
-        return "Web search not available yet."
-    
-    async def handle_conversation(
-        self, 
-        text: str, 
-        memory_context: str = "", 
-        rag_context: str = ""
-    ) -> str:
-        """
-        Handle general conversation.
-        
-        Args:
-            text: User's message
-            memory_context: Context from memory (conversations)
-            rag_context: Context from documents (RAG)
-            
-        Returns:
-            AI response
-        """
-        logger.debug(f"Conversation: {text}")
-        print(f"[AI] Processing: {text}")
-        sys.stdout.flush()
-        
-        # Find conversation action
-        conv_action = None
-        for action in self.actions.get_all_actions().values():
-            if action.name == "AIChatAction":
-                conv_action = action
-                break
-        
-        if conv_action:
-            # Pass both contexts via params
-            params = {}
-            
-            # Combine memory and RAG contexts
-            full_context = ""
-            if memory_context:
-                full_context += memory_context
-            if rag_context:
-                if full_context:
-                    full_context += "\n\n"
-                full_context += rag_context
-            
-            if full_context:
-                params['memory_context'] = full_context
-                logger.info(f"Injecting combined context ({len(full_context)} chars)")
-                print(f"[CONTEXT] Using {len(full_context)} chars (memory + RAG)")
-            
-            result = await conv_action.execute(text, params=params)
-            return result.message
-        
-        logger.warning("AI chat action not found")
-        return "I'm not sure how to respond to that."
-    
     def speak(self, text: str):
         """Speak text to user"""
         logger.debug(f"Speaking: {text[:50]}...")
@@ -384,7 +286,12 @@ class AssistantOrchestrator:
     
     async def process_user_input(self, user_input: str) -> str:
         """
-        Process user input through the full pipeline WITH MEMORY + RAG.
+        Process user input through the service.
+        
+        SIMPLIFIED: Just calls the service and returns response.
+        Service handles memory retrieval, intent detection, routing, and storage.
+        
+        FIXED: Service now passes memory to web searches and stores ALL turns.
         
         Args:
             user_input: User's transcribed speech
@@ -392,109 +299,36 @@ class AssistantOrchestrator:
         Returns:
             Response message
         """
-        start_time = time.time()
-        
         try:
-            # Step 1: Retrieve MEMORY context
-            memory_context = ""
-            if self.memory:
-                try:
-                    print(f"[MEMORY] Retrieving context...")
-                    memory_results = await self.memory.retrieve_context(
-                        query=user_input,
-                        max_results=3,
-                        include_recent=True
-                    )
-                    
-                    if memory_results:
-                        memory_context = self.memory.format_context_for_prompt(
-                            memory_results,
-                            max_length=500
-                        )
-                        logger.info(f"Retrieved {len(memory_results)} memory items")
-                        print(f"[MEMORY] Found {len(memory_results)} relevant memories")
-                except Exception as e:
-                    logger.error(f"Memory retrieval error: {e}")
-                    print(f"[WARN] Memory retrieval failed: {e}")
+            # Call the service (handles everything including web search fix)
+            result = await self.conversation_service.process_input(user_input)
             
-            # Step 2: NEW - Search RAG documents
-            rag_context = ""
-            if self.rag:
-                try:
-                    print(f"[RAG] Searching documents...")
-                    rag_results = await self.rag.retrieve(
-                        query=user_input,
-                        top_k=3
-                    )
-                    
-                    if rag_results:
-                        rag_context = self.rag.format_context(
-                            rag_results,
-                            max_length=800
-                        )
-                        logger.info(f"Retrieved {len(rag_results)} document chunks")
-                        print(f"[RAG] Found {len(rag_results)} relevant documents")
-                except Exception as e:
-                    logger.error(f"RAG retrieval error: {e}")
-                    print(f"[WARN] RAG retrieval failed: {e}")
+            # Log performance and metadata
+            logger.info(
+                f"Processed in {result['duration_ms']:.0f}ms "
+                f"(intent: {result['intent']}, "
+                f"memory: {result['memory_stored']}, "
+                f"category: {result['memory_category']}, "
+                f"rag: {result['rag_used']})"
+            )
             
-            # Step 3: Detect intent
-            intent_type = await self.detect_intent(user_input)
+            # Print status for debugging
+            print(
+                f"[PROCESSED] {result['duration_ms']:.0f}ms | "
+                f"Intent: {result['intent']} | "
+                f"Memory: {'✓' if result['memory_stored'] else '✗'} "
+                f"({result['memory_category']})"
+            )
+            sys.stdout.flush()
             
-            # Step 4: Route based on intent (with context)
-            if intent_type == IntentType.ACTION:
-                response = await self.handle_action(user_input)
-            elif intent_type == IntentType.WEB:
-                response = await self.handle_web_search(user_input)
-            else:  # AI/Conversation
-                response = await self.handle_conversation(
-                    user_input, 
-                    memory_context, 
-                    rag_context
-                )
-            
-            # Calculate processing time
-            duration_ms = (time.time() - start_time) * 1000
-            
-            # Step 5: Store conversation in memory
-            if self.memory:
-                try:
-                    print(f"[MEMORY] Storing conversation...")
-                    classification = await self.memory.process_conversation(
-                        user_input=user_input,
-                        assistant_response=response,
-                        intent_type=intent_type.value,
-                        duration_ms=duration_ms,
-                        prompt_tokens=0,  # TODO: Track from AI calls
-                        completion_tokens=0
-                    )
-                    
-                    logger.info(
-                        f"Memory: {classification.category.value} "
-                        f"(importance: {classification.importance_score:.2f})"
-                    )
-                    print(f"[MEMORY] Stored as {classification.category.value}")
-                    
-                except Exception as e:
-                    logger.error(f"Memory storage error: {e}")
-                    print(f"[WARN] Memory storage failed: {e}")
-            
-            # Log the conversation (legacy logging)
-            from utils.logger import log_conversation
-            log_conversation(user_input, response)
-            
-            return response
+            return result['response']
             
         except Exception as e:
-            logger.error(f"Error processing input: {e}", exc_info=True)
-            error_response = "Sorry, I encountered an error processing your request."
-            
-            # Log error conversation too
-            from utils.logger import log_conversation
-            log_conversation(user_input, error_response)
-            
-            return error_response
-        
+            logger.error(f"Error in process_user_input: {e}", exc_info=True)
+            print(f"[ERROR] {e}")
+            sys.stdout.flush()
+            return "Sorry, I encountered an error processing your request."
+    
     async def run_loop(self):
         """Main assistant loop (voice input, voice output)"""
         logger.info("Starting assistant loop...")
@@ -502,20 +336,19 @@ class AssistantOrchestrator:
         sys.stdout.flush()
         
         # Display system stats at startup
-        if self.memory:
-            stats = self.memory.get_stats()
-            print(f"[MEMORY] Loaded: {stats['sql']['total_facts']} facts, "
-                  f"{stats['sql']['total_conversations']} conversations")
-        
-        if self.rag:
-            from modules.rag import get_indexer
-            try:
-                indexer = get_indexer()
-                rag_stats = indexer.get_stats()
-                print(f"[RAG] Indexed: {rag_stats.total_documents} documents, "
-                      f"{rag_stats.total_chunks} chunks")
-            except:
-                pass
+        if self.conversation_service:
+            stats = self.conversation_service.get_stats()
+            if stats.get('memory_enabled'):
+                mem_stats = stats['memory']['sql']
+                print(f"[MEMORY] Loaded: {mem_stats['total_facts']} facts, "
+                      f"{mem_stats['total_conversations']} conversations")
+            
+            if stats.get('rag_enabled') and 'rag' in stats:
+                rag_stats = stats['rag']
+                print(f"[RAG] Indexed: {rag_stats['total_documents']} documents, "
+                      f"{rag_stats['total_chunks']} chunks")
+            
+            print("[INFO] Web searches now use memory context and are stored in sessions")
         
         while True:
             try:
@@ -529,11 +362,10 @@ class AssistantOrchestrator:
                 # Listen
                 user_input = self.listen_to_user()
                 if not user_input:
-                    # Resume audio if no input
                     self._resume_all_audio()
                     continue
                 
-                # Process (includes memory + RAG retrieval and storage)
+                # Process via service (handles web search memory fix automatically)
                 response = await self.process_user_input(user_input)
                 
                 # Respond
@@ -559,21 +391,20 @@ class AssistantOrchestrator:
     async def run_text_loop(self):
         """Interactive console mode (text input, text output)"""
         print("Text mode. Type 'exit' to quit.")
+        print("Special commands: 'memory: <cmd>', 'rag: <cmd>'\n")
         
-        # Show memory stats
-        if self.memory:
-            stats = self.memory.get_stats()
-            print(f"Memory: {stats['sql']['total_facts']} facts loaded")
-        
-        # NEW: Show RAG stats
-        if self.rag:
-            from modules.rag import get_indexer
-            try:
-                indexer = get_indexer()
-                rag_stats = indexer.get_stats()
-                print(f"RAG: {rag_stats.total_documents} documents indexed\n")
-            except:
-                pass
+        # Show stats
+        if self.conversation_service:
+            stats = self.conversation_service.get_stats()
+            if stats.get('memory_enabled'):
+                mem_stats = stats['memory']['sql']
+                print(f"Memory: {mem_stats['total_facts']} facts loaded")
+            
+            if stats.get('rag_enabled') and 'rag' in stats:
+                rag_stats = stats['rag']
+                print(f"RAG: {rag_stats['total_documents']} documents indexed")
+            
+            print("Info: Web searches now use memory and are stored in sessions\n")
         
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
@@ -601,12 +432,12 @@ class AssistantOrchestrator:
                         await self._handle_memory_command(user_input[7:].strip())
                         continue
                     
-                    # NEW: Special RAG commands
+                    # Special RAG commands
                     if user_input.lower().startswith("rag:"):
                         await self._handle_rag_command(user_input[4:].strip())
                         continue
-                        
-                    # Process with memory + RAG
+                    
+                    # Process with service (handles web search memory automatically)
                     response = await self.process_user_input(user_input)
                     print(f"\nAssistant: {response}\n")
                     
@@ -615,6 +446,10 @@ class AssistantOrchestrator:
                     break
                 except Exception as e:
                     print(f"\nError: {e}\n")
+    
+    # ... (keep all other methods: _handle_memory_command, _handle_rag_command, 
+    #      run_voice_to_text_loop, run_text_to_voice_loop, get_status, run_headless)
+    #      unchanged from your original version
     
     async def _handle_memory_command(self, command: str):
         """Handle special memory commands"""
@@ -647,8 +482,17 @@ class AssistantOrchestrator:
             for fact in facts:
                 print(f"  • [{fact.category.value if fact.category else 'unknown'}] {fact.content}")
         
+        elif command_lower == "session":
+            # NEW: Show current session history
+            convs = self.memory.get_conversation_history(limit=10)
+            print(f"\n💬 Current Session ({len(convs)} turns):")
+            for conv in convs:
+                print(f"\n  Turn {conv.turn_no} [{conv.intent_type}]:")
+                print(f"  User: {conv.user_input}")
+                print(f"  Assistant: {conv.assistant_response[:100]}...")
+        
         else:
-            print("Memory commands: stats, search <query>, facts")
+            print("Memory commands: stats, search <query>, facts, session")
     
     async def _handle_rag_command(self, command: str):
         """Handle special RAG commands"""
@@ -703,29 +547,24 @@ class AssistantOrchestrator:
         
         while True:
             try:
-                # Wait for wake word (pauses audio)
                 if not await self.wait_for_wake_word():
                     continue
                 
-                # Acknowledge (text only)
                 print("\n[ASSISTANT] Listening...")
                 sys.stdout.flush()
                 
-                # Listen
                 user_input = self.listen_to_user()
                 if not user_input:
                     self._resume_all_audio()
                     continue
                 
-                # Process (with memory + RAG)
+                # Process via service
                 response = await self.process_user_input(user_input)
                 
-                # Respond with text only (no TTS)
                 logger.info(f"Response: {response}")
                 print(f"\n[ASSISTANT] {response}\n")
                 sys.stdout.flush()
                 
-                # Resume audio
                 self._resume_all_audio()
                 
             except KeyboardInterrupt:
@@ -754,7 +593,6 @@ class AssistantOrchestrator:
         with ThreadPoolExecutor() as executor:
             while True:
                 try:
-                    # Get input asynchronously
                     user_input = await asyncio.get_event_loop().run_in_executor(executor, get_input)
                     
                     if user_input is None or user_input.lower() == 'exit':
@@ -763,17 +601,14 @@ class AssistantOrchestrator:
                     if not user_input.strip():
                         continue
                     
-                    # Pause any playing audio
                     self._pause_all_audio()
                     
-                    # Process (with memory + RAG)
+                    # Process via service
                     response = await self.process_user_input(user_input)
                     
-                    # Speak response
                     logger.info(f"Response: {response}")
                     self.speak(response)
                     
-                    # Resume audio
                     self._resume_all_audio()
                     
                 except KeyboardInterrupt:
@@ -792,36 +627,22 @@ class AssistantOrchestrator:
             'intent': self.intent is not None,
             'actions': len(self.actions.list_actions()) if self.actions else 0,
             'memory': self.memory is not None,
-            'rag': self.rag is not None  # NEW
+            'rag': self.rag is not None,
+            'service': self.conversation_service is not None
         }
         
-        # Add memory stats if available
-        if self.memory:
-            memory_stats = self.memory.get_stats()
-            status['memory_stats'] = memory_stats
-        
-        # NEW: Add RAG stats if available
-        if self.rag:
-            try:
-                from modules.rag import get_indexer
-                indexer = get_indexer()
-                rag_stats = indexer.get_stats()
-                status['rag_stats'] = {
-                    'total_documents': rag_stats.total_documents,
-                    'total_chunks': rag_stats.total_chunks
-                }
-            except:
-                pass
+        # Add service stats if available
+        if self.conversation_service:
+            service_stats = self.conversation_service.get_stats()
+            status['service_stats'] = service_stats
         
         return status
     
     async def run_headless(self):
         """Headless mode for automation/API"""
-        # Initialize only required modules (no STT/TTS)
         logger.info("Headless mode - minimal initialization")
         print("[INFO] Headless mode ready for API/automation")
         
-        # Keep running for API access
         try:
             while True:
                 await asyncio.sleep(1)
