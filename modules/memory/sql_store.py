@@ -214,7 +214,7 @@ class SQLStore(MemoryStore):
         """)
         
         conn.commit()
-        logger.info("✅ Database schema initialized successfully")
+        logger.info("Database schema initialized successfully")
     
     def store_conversation(self, conversation: Conversation) -> int:
         """Store a conversation and return its ID"""

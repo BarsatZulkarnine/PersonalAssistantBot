@@ -64,7 +64,7 @@ class YouTubeStreamer:
             # Check if already in cache
             cached_file = self._find_in_cache(query)
             if cached_file:
-                print(f"[YOUTUBE] ✅ Found in cache: {cached_file.name}")
+                print(f"[YOUTUBE] Found in cache: {cached_file.name}")
                 return str(cached_file), str(cached_file)
             
             # Get video info (fast, no download)
@@ -217,7 +217,7 @@ class YouTubeStreamer:
                 with self.yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.extract_info(search_query, download=True)
             
-            print(f"[YOUTUBE] ✅ Cached: {sanitized_title}.mp3")
+            print(f"[YOUTUBE] Cached: {sanitized_title}.mp3")
             logger.info(f"Background download complete: {sanitized_title}.mp3")
             
         except Exception as e:
@@ -284,7 +284,7 @@ class YouTubeStreamer:
         # Check cache first
         cached = self._find_in_cache(query)
         if cached:
-            print(f"[YOUTUBE] ✅ Found in cache: {cached.name}")
+            print(f"[YOUTUBE] Found in cache: {cached.name}")
             return str(cached)
         
         # Download synchronously (original behavior)
@@ -341,7 +341,7 @@ class YouTubeStreamer:
             downloaded_files = list(self.cache_dir.glob('*.mp3'))
             if downloaded_files:
                 file_path = max(downloaded_files, key=lambda p: p.stat().st_mtime)
-                print(f"[YOUTUBE] ✅ Downloaded: {file_path.name}")
+                print(f"[YOUTUBE] Downloaded: {file_path.name}")
                 return str(file_path)
             
             return None

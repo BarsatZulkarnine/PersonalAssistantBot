@@ -150,7 +150,7 @@ class DocumentIndexer:
         """)
         
         conn.commit()
-        logger.info("✅ Database schema initialized")
+        logger.info("Database schema initialized")
     
     def index_document(
         self,
@@ -210,7 +210,7 @@ class DocumentIndexer:
             )
             self._store_chunk(chunk)
         
-        logger.info(f"✅ Indexed document: {path.name} (id={doc_id}, chunks={len(chunks)})")
+        logger.info(f"Indexed document: {path.name} (id={doc_id}, chunks={len(chunks)})")
         
         return document
     
@@ -258,7 +258,7 @@ class DocumentIndexer:
             except Exception as e:
                 logger.error(f"Failed to index {file_path}: {e}")
         
-        logger.info(f"✅ Indexed {len(indexed_docs)} documents from {directory}")
+        logger.info(f"Indexed {len(indexed_docs)} documents from {directory}")
         
         return indexed_docs
     

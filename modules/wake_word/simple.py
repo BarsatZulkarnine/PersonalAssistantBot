@@ -87,7 +87,7 @@ class SimpleWakeWord(WakeWordDetector):
                     
                     if any(wake in text for wake in wake_words):
                         logger.info(f"Wake word detected: '{text}'")
-                        print(f"✅ Wake word detected!")
+                        print(f"Wake word detected!")
                         return True
                     
                 except sr.WaitTimeoutError:

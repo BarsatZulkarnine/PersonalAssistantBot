@@ -76,7 +76,7 @@ class AIChatAction(Action):
             answer = response.choices[0].message.content.strip()
             
             logger.info(f"AI chat completed")
-            print(f"✅ AI CHAT: Generated response ({len(answer)} chars)")
+            print(f"AI CHAT: Generated response ({len(answer)} chars)")
             
             return ActionResult(
                 success=True,

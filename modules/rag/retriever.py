@@ -43,7 +43,7 @@ class HybridRetriever(RAGRetriever):
                     name="rag_documents",
                     metadata={"description": "RAG document chunks"}
                 )
-                logger.info("✅ Vector store ready for RAG")
+                logger.info("Vector store ready for RAG")
             except Exception as e:
                 logger.warning(f"Vector store initialization failed: {e}")
                 self.vector_store = None

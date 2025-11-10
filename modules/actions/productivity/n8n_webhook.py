@@ -41,7 +41,7 @@ class N8nWebhookAction(Action):
         
         if configured_count > 0:
             logger.info(f"[OK] n8n integration initialized with {configured_count} configured webhooks")
-            print(f"[N8N] ✅ Initialized with {configured_count} configured webhooks")
+            print(f"[N8N] Initialized with {configured_count} configured webhooks")
             self.enabled = True
         else:
             logger.warning("[WARN] No n8n webhooks configured (all webhook_path are null)")

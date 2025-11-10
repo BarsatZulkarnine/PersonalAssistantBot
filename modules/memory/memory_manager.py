@@ -47,7 +47,7 @@ class MemoryManager:
         if CHROMADB_AVAILABLE:
             self.vector_store = ChromaVectorStore(vector_path)
             self.vector_store.initialize()
-            logger.info("✅ Vector store enabled")
+            logger.info("Vector store enabled")
         else:
             logger.warning("⚠️  Vector store disabled (ChromaDB not installed)")
         

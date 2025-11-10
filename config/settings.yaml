@@ -1,7 +1,7 @@
 # Application Settings
 app:
   name: "Voice Assistant"
-  version: "2.0.0"
+  version: "3.0.0"
   debug: true
 
 # Speech Recognition
@@ -13,12 +13,12 @@ speech:
 
 # Text-to-Speech
 tts:
-  provider: "gtts"  # Options: gtts, elevenlabs, piper, azure
+  provider: "gtts"  # Options: gtts, elevenlabs, piper, azure, openai_tts
   language: "en"
   speed: 1.0
   pitch: 1.0
-  voice: null  # Specific voice (provider-dependent)
-  streaming: true  # Enable sentence-by-sentence playback (recommended!)
+  voice: null
+  streaming: true
 
 # AI Configuration
 ai:
@@ -31,6 +31,31 @@ ai:
 intent:
   confidence_threshold: 0.7
   fallback_to_ai: true
+
+# ============================================
+# I/O Configuration (NEW - Phase 2)
+# ============================================
+io:
+  # Input mode: auto, microphone, keyboard, websocket (future)
+  input: auto
+  
+  # Output mode: auto, speaker, console, websocket (future)
+  output: auto
+  
+  # Fallback behavior
+  fallback:
+    enabled: true           # Auto-fallback if hardware unavailable
+    input_order:            # Try in this order
+      - microphone
+      - keyboard
+    output_order:
+      - speaker
+      - console
+  
+  # Hardware requirements
+  requirements:
+    microphone_required: false   # Exit if mic required but unavailable
+    speaker_required: false      # Exit if speaker required but unavailable
 
 # Security
 security:

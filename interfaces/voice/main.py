@@ -1,8 +1,8 @@
 """
-CLI Interface - Text-Only Mode
+Voice Interface - Audio Mode
 
-Pure text interface using keyboard + console.
-No audio hardware required - perfect for headless servers.
+Full voice interface using microphone + speaker.
+This is the traditional "voice assistant" mode.
 """
 
 import asyncio
@@ -16,22 +16,22 @@ from core.orchestrator import AssistantOrchestrator
 from utils.logger import get_logger
 from utils.config import load_global_config
 
-logger = get_logger('interfaces.cli')
+logger = get_logger('interfaces.voice')
 
 
 def print_banner():
-    """Print CLI banner"""
+    """Print voice interface banner"""
     banner = """
     ╔════════════════════════════════════════╗
-    ║   Voice Assistant - CLI Interface      ║
-    ║   Text-only mode (no audio required)   ║
+    ║   Voice Assistant - Voice Interface    ║
+    ║   Microphone + Speaker Mode            ║
     ╚════════════════════════════════════════╝
     """
     print(banner)
 
 
 async def main():
-    """CLI interface entry point"""
+    """Voice interface entry point"""
     try:
         print_banner()
         
@@ -39,18 +39,18 @@ async def main():
         logger.info("Loading configuration...")
         config = load_global_config()
         
-        # Initialize orchestrator with TEXT I/O
-        logger.info("Initializing CLI interface...")
+        # Initialize orchestrator with VOICE I/O
+        logger.info("Initializing voice interface...")
         print("Initializing...")
         
         orchestrator = AssistantOrchestrator(
-            input_mode='keyboard',
-            output_mode='console'
+            input_mode='microphone',
+            output_mode='speaker'
         )
         
         # Show status
         status = orchestrator.get_status()
-        print(f"\n[OK] Ready! Type your messages below.")
+        print(f"\n[OK] Ready! Say the wake word to start.")
         print(f"[INFO] Input: {status['audio_input']}")
         print(f"[INFO] Output: {status['audio_output']}")
         
@@ -63,13 +63,7 @@ async def main():
                 rag = stats['rag']
                 print(f"[RAG] {rag['total_documents']} documents indexed")
         
-        print("\nCommands:")
-        print("  - Type messages normally")
-        print("  - 'memory:stats' - View memory stats")
-        print("  - 'memory:search <query>' - Search memory")
-        print("  - 'rag:stats' - View RAG stats")
-        print("  - 'rag:search <query>' - Search documents")
-        print("  - 'exit' or 'quit' - Exit\n")
+        print("\nListening for wake word...\n")
         
         # Run main loop
         await orchestrator.run_loop()
@@ -81,7 +75,7 @@ async def main():
         return 0
     
     except Exception as e:
-        logger.critical(f"CLI error: {e}", exc_info=True)
+        logger.critical(f"Voice interface error: {e}", exc_info=True)
         print(f"\n💥 Error: {e}")
         return 1
 
