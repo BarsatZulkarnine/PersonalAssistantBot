@@ -1,0 +1,68 @@
+# AI Provider Configuration
+# Centralized AI configuration for all modules
+
+# Default provider to use
+provider: "openai"  # Options: openai, ollama
+
+# OpenAI Configuration
+openai:
+  model: "gpt-4o-mini"  # gpt-4o, gpt-4o-mini, gpt-3.5-turbo
+  api_key: null  # If null, uses OPENAI_API_KEY from environment
+  base_url: null  # Optional: custom base URL
+  temperature: 0.7
+  max_tokens: 500
+  timeout: 30
+
+# Ollama Configuration (Local LLMs)
+ollama:
+  model: "llama3"  # llama3, mistral, phi, gemma, etc.
+  base_url: "http://localhost:11434"  # Ollama server URL
+  temperature: 0.7
+  max_tokens: 500
+  timeout: 60
+
+# Provider-specific use cases
+# You can override providers for specific modules
+overrides:
+  # Intent detection - use faster model
+  intent:
+    provider: "openai"
+    model: "gpt-4o-mini"
+    temperature: 0.3
+    max_tokens: 10
+  
+  # Memory classification - use faster model
+  memory_classifier:
+    provider: "openai"
+    model: "gpt-4o-mini"
+    temperature: 0.3
+    max_tokens: 200
+  
+  # Conversation - use better model
+  conversation:
+    provider: "openai"
+    model: "gpt-4o-mini"
+    temperature: 0.7
+    max_tokens: 150
+  
+  # Web search summarization
+  web_search:
+    provider: "openai"
+    model: "gpt-4o-mini"
+    temperature: 0.7
+    max_tokens: 150
+
+# Cost tracking
+cost_tracking:
+  enabled: true
+  log_usage: true
+  
+# Rate limiting
+rate_limiting:
+  enabled: false
+  max_requests_per_minute: 60
+  
+# Caching
+caching:
+  enabled: false  # Future feature
+  ttl_seconds: 3600

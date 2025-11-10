@@ -1,29 +1,24 @@
 """
-Memory Classifier - AI-Powered Memory Worth Detection
+Memory Classifier - UPDATED
 
-Classifies conversations into three tiers:
-- EPHEMERAL: Don't store (greetings, time, weather, music commands)
-- CONVERSATIONAL: Store in SQL only (jokes, generic Q&A)
-- FACTUAL: Store in SQL + Vector DB (personal info, preferences, learnings)
+Now uses AI provider abstraction instead of direct OpenAI calls.
 """
 
-import os
 import json
 from typing import Optional, List
-from openai import AsyncOpenAI
-from dotenv import load_dotenv
 
 from modules.memory.base import (
     MemoryClassifier, MemoryClassification, MemoryCategory, FactCategory
 )
+from core.ai.integration import get_ai_provider
+from core.ai import AIMessage
 from utils.logger import get_logger
 
-load_dotenv()
 logger = get_logger('memory.classifier')
 
 class AIMemoryClassifier(MemoryClassifier):
     """
-    AI-powered memory classifier using OpenAI.
+    AI-powered memory classifier using AI provider.
     
     Determines if a conversation should be:
     1. Ignored (ephemeral)
@@ -31,12 +26,17 @@ class AIMemoryClassifier(MemoryClassifier):
     3. Embedded (factual)
     """
     
-    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.3):
-        self.model = model
+    def __init__(self, temperature: float = 0.3):
         self.temperature = temperature
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        logger.info(f"Memory classifier initialized (model={model})")
+        # Get AI provider (initialized in orchestrator)
+        self.ai_provider = get_ai_provider()
+        
+        logger.info(
+            f"Memory classifier initialized "
+            f"(provider={self.ai_provider.config.provider_name}, "
+            f"model={self.ai_provider.config.model})"
+        )
     
     async def classify(
         self,
@@ -56,24 +56,31 @@ class AIMemoryClassifier(MemoryClassifier):
             MemoryClassification with category and importance
         """
         try:
-            # Build prompt
+            # Build prompts
             system_prompt = self._build_system_prompt()
             user_prompt = self._build_user_prompt(user_input, assistant_response, intent_type)
             
-            # Call OpenAI
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
+            # Call AI provider
+            messages = [
+                AIMessage(role="system", content=system_prompt),
+                AIMessage(role="user", content=user_prompt)
+            ]
+            
+            response = await self.ai_provider.chat(
+                messages=messages,
                 temperature=self.temperature,
-                max_tokens=200,
-                response_format={"type": "json_object"}
+                max_tokens=200
             )
             
-            # Parse response
-            result_text = response.choices[0].message.content.strip()
+            # Parse response (should be JSON)
+            result_text = response.content.strip()
+            
+            # Remove markdown code blocks if present
+            if result_text.startswith("```json"):
+                result_text = result_text.replace("```json", "").replace("```", "").strip()
+            elif result_text.startswith("```"):
+                result_text = result_text.replace("```", "").strip()
+            
             result = json.loads(result_text)
             
             classification = self._parse_classification(result)
@@ -228,8 +235,8 @@ Assistant: {assistant_response}"""
         Returns:
             List of MemoryClassification objects
         """
-        # TODO: Implement batch classification for cost optimization
         # For now, classify one by one
+        # Could be optimized with batching in the future
         results = []
         for user_input, assistant_response, intent_type in conversations:
             classification = await self.classify(user_input, assistant_response, intent_type)

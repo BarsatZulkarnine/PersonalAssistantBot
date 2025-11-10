@@ -1,21 +1,19 @@
 """
-Simple AI Intent Detector
+Simple AI Intent Detector - UPDATED
 
-Returns one of three categories: AI, Web, Action
+Now uses AI provider abstraction instead of direct OpenAI calls.
 """
 
-import os
-from openai import AsyncOpenAI
-from dotenv import load_dotenv
 from modules.intent.base import IntentDetector, IntentResult, IntentType
+from core.ai.integration import get_ai_provider
+from core.ai import AIMessage
 from utils.logger import get_logger
 
-load_dotenv()
 logger = get_logger('intent.simple_ai')
 
 class SimpleAiIntent(IntentDetector):
     """
-    Simple AI-based intent detection.
+    Simple AI-based intent detection using AI provider.
     
     Asks AI to classify into: AI, Web, or Action
     """
@@ -24,17 +22,21 @@ class SimpleAiIntent(IntentDetector):
         super().__init__(config)
         
         simple_config = config.get('simple_ai', {})
-        self.model = simple_config.get('model', 'gpt-4o-mini')
         self.temperature = simple_config.get('temperature', 0.3)
         self.categories = simple_config.get('categories', ['AI', 'Web', 'Action'])
         
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Get AI provider (initialized in orchestrator)
+        self.ai_provider = get_ai_provider()
         
-        logger.info(f"Simple AI Intent initialized (model={self.model})")
+        logger.info(
+            f"Simple AI Intent initialized "
+            f"(provider={self.ai_provider.config.provider_name}, "
+            f"model={self.ai_provider.config.model})"
+        )
     
     async def detect(self, text: str) -> IntentResult:
         """
-        Detect intent using AI.
+        Detect intent using AI provider.
         
         Returns one of: AI, Web, Action
         """
@@ -67,17 +69,19 @@ Reply with ONLY ONE WORD: AI, Web, or Action
 
 Nothing else. Just the category."""
 
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Classify: {text}"}
-                ],
+            # Use AI provider's chat method
+            messages = [
+                AIMessage(role="system", content=system_prompt),
+                AIMessage(role="user", content=f"Classify: {text}")
+            ]
+            
+            response = await self.ai_provider.chat(
+                messages=messages,
                 temperature=self.temperature,
                 max_tokens=10
             )
             
-            result_text = response.choices[0].message.content.strip().upper()
+            result_text = response.content.strip().upper()
             
             # Parse result
             if "WEB" in result_text:
@@ -91,7 +95,7 @@ Nothing else. Just the category."""
             
             return IntentResult(
                 intent_type=intent_type,
-                confidence=0.9,  # High confidence for AI classification
+                confidence=0.9,
                 original_text=text,
                 reasoning=result_text
             )

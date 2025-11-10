@@ -17,6 +17,9 @@ sys.stdout.reconfigure(line_buffering=True)
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# maybe will fix this one day
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(), override=False)
 
 def print_banner():
     """Print startup banner"""

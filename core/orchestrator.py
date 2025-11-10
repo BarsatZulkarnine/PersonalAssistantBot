@@ -1,8 +1,7 @@
 """
-Main Orchestrator - PHASE 2: WITH I/O ABSTRACTION
+Main Orchestrator - UPDATED WITH AI PROVIDER ABSTRACTION
 
-Now uses abstract I/O interfaces instead of direct STT/TTS.
-Can easily swap input (mic/keyboard) and output (speaker/console).
+Now uses centralized AI provider instead of direct OpenAI calls.
 """
 
 from pathlib import Path
@@ -25,21 +24,22 @@ from core.services.conversation_service import ConversationService
 from modules.memory import get_memory_manager, MemoryManager
 from modules.rag import get_retriever, HybridRetriever
 
-# NEW: I/O Abstraction
+# AI Provider (NEW!)
+from core.ai.integration import initialize_ai_provider, get_ai_provider
+from core.ai import AIProvider
+
+# I/O Abstraction
 from core.io import AudioInput, AudioOutput, IOFactory
-from core.io.output.speaker_output import SpeakerOutput  # FIXED: Added import
-from core.io.output.console_output import ConsoleOutput  # FIXED: Added import
+from core.io.output.speaker_output import SpeakerOutput
+from core.io.output.console_output import ConsoleOutput
 
 logger = get_logger('orchestrator')
 
 class AssistantOrchestrator:
     """
-    Main coordinator - PHASE 2 with I/O Abstraction.
+    Main coordinator with AI Provider abstraction.
     
-    Changes:
-    - Uses AudioInput instead of direct STT
-    - Uses AudioOutput instead of direct TTS
-    - I/O is swappable via factory
+    NEW: Uses centralized AI provider for all AI operations.
     """
     
     def __init__(
@@ -71,7 +71,10 @@ class AssistantOrchestrator:
         self.rag: Optional[HybridRetriever] = None
         self.conversation_service: Optional[ConversationService] = None
         
-        # NEW: Abstract I/O interfaces
+        # NEW: AI Provider
+        self.ai_provider: Optional[AIProvider] = None
+        
+        # I/O interfaces
         self.audio_input: Optional[AudioInput] = None
         self.audio_output: Optional[AudioOutput] = None
         
@@ -84,6 +87,16 @@ class AssistantOrchestrator:
         """Load all modules and initialize I/O"""
         try:
             logger.info("Initializing modules...")
+            
+            # NEW: Initialize AI Provider FIRST (other modules depend on it)
+            try:
+                self.ai_provider = initialize_ai_provider()
+                logger.info(f"✅ AI Provider: {self.ai_provider.config.provider_name}/{self.ai_provider.config.model}")
+                print(f"[OK] AI Provider: {self.ai_provider.config.provider_name} ({self.ai_provider.config.model})")
+            except Exception as e:
+                logger.error(f"AI Provider initialization failed: {e}")
+                print(f"[FAIL] AI Provider failed: {e}")
+                raise
             
             # Load wake word detector
             try:
@@ -103,7 +116,6 @@ class AssistantOrchestrator:
             except Exception as e:
                 logger.error(f"STT module failed: {e}")
                 print(f"[FAIL] STT module failed: {e}")
-                # Don't raise - might use keyboard input
                 self.stt = None
             
             # Load TTS (needed for speaker output)
@@ -114,7 +126,6 @@ class AssistantOrchestrator:
             except Exception as e:
                 logger.error(f"TTS module failed: {e}")
                 print(f"[FAIL] TTS module failed: {e}")
-                # Don't raise - might use console output
                 self.tts = None
             
             # Load intent detector
@@ -160,50 +171,40 @@ class AssistantOrchestrator:
                 self.rag = None
             
             # Initialize ConversationService
+         # Initialize I/O via factory
             try:
-                self.conversation_service = ConversationService(
-                    intent_detector=self.intent,
-                    action_registry=self.actions,
-                    memory_manager=self.memory,
-                    rag_retriever=self.rag
-                )
-                logger.info("ConversationService initialized")
-                print(f"[OK] ConversationService: Business logic ready")
-            except Exception as e:
-                logger.error(f"ConversationService failed: {e}")
-                print(f"[FAIL] ConversationService failed: {e}")
-                raise
-            
-            # NEW: Initialize I/O via factory
-            try:
+                force_voice = (self.input_mode == 'microphone' and self.output_mode == 'speaker')
+
                 self.audio_input, self.audio_output = IOFactory.create_io_pair(
                     input_mode=self.input_mode,
                     output_mode=self.output_mode,
                     stt_provider=self.stt,
                     tts_provider=self.tts,
-                    fallback=True  # Auto-fallback if hardware unavailable
+                    fallback=not force_voice  # voice mode should NOT silently degrade
                 )
-                
-                # Log I/O configuration
+
                 input_caps = self.audio_input.get_capabilities()
                 output_caps = self.audio_output.get_capabilities()
-                
+
+                # Require wake word only for microphone input
+                self.require_wake_word = (input_caps.input_type == "microphone")
+
                 logger.info(
                     f"I/O initialized: "
                     f"input={self.audio_input.__class__.__name__} ({input_caps.input_type}), "
                     f"output={self.audio_output.__class__.__name__} ({output_caps.output_type})"
                 )
-                
                 print(f"[OK] Input: {self.audio_input.__class__.__name__} ({input_caps.input_type})")
                 print(f"[OK] Output: {self.audio_output.__class__.__name__} ({output_caps.output_type})")
-                
+
             except Exception as e:
                 logger.error(f"I/O initialization failed: {e}")
                 print(f"[FAIL] I/O initialization failed: {e}")
                 raise
+
             
             logger.info("All modules initialized successfully!")
-            print("[OK] All modules initialized with I/O abstraction!")
+            print("[OK] All modules initialized with AI provider abstraction!")
             sys.stdout.flush()
             
         except Exception as e:
@@ -232,7 +233,6 @@ class AssistantOrchestrator:
             except Exception as e:
                 logger.debug(f"Music pause failed: {e}")
         
-        # Stop TTS if available
         if self.tts and hasattr(self.tts, 'is_speaking') and self.tts.is_speaking:
             try:
                 self.tts.stop()
@@ -302,15 +302,12 @@ class AssistantOrchestrator:
             return "Sorry, I encountered an error."
     
     async def run_loop(self):
-        """
-        Main assistant loop - USING I/O ABSTRACTION
-        
-        Now hardware-agnostic!
-        """
+        """Main assistant loop"""
         logger.info("Starting assistant loop...")
         print("[START] Assistant loop starting...")
         print(f"[INFO] Input: {self.audio_input.__class__.__name__}")
         print(f"[INFO] Output: {self.audio_output.__class__.__name__}")
+        print(f"[INFO] AI Provider: {self.ai_provider.config.provider_name}/{self.ai_provider.config.model}")
         sys.stdout.flush()
         
         # Display stats
@@ -333,7 +330,7 @@ class AssistantOrchestrator:
                 if isinstance(self.audio_output, SpeakerOutput):
                     self.audio_output.output("Yes?")
                 
-                # Listen (NEW: via abstraction)
+                # Listen
                 logger.debug("Waiting for input...")
                 print("[LISTEN] Waiting for input...")
                 sys.stdout.flush()
@@ -352,7 +349,7 @@ class AssistantOrchestrator:
                 # Process
                 response = await self.process_user_input(user_input)
                 
-                # Output (NEW: via abstraction)
+                # Output
                 logger.info(f"Response: {response}")
                 print(f"[RESPONSE] {response[:80]}...")
                 sys.stdout.flush()
@@ -376,6 +373,7 @@ class AssistantOrchestrator:
     def get_status(self) -> dict:
         """Get status of all modules"""
         status = {
+            'ai_provider': f"{self.ai_provider.config.provider_name}/{self.ai_provider.config.model}" if self.ai_provider else None,
             'wake_word': self.wake_word is not None,
             'stt': self.stt is not None,
             'tts': self.tts is not None,
@@ -392,6 +390,3 @@ class AssistantOrchestrator:
             status['service_stats'] = self.conversation_service.get_stats()
         
         return status
-    
-    # Keep all other methods (memory commands, RAG commands, etc.)
-    # from your current orchestrator unchanged
