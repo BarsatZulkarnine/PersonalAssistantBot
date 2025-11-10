@@ -293,6 +293,236 @@ class SQLStore(MemoryStore):
         logger.debug(f"Stored fact {fact_id}: {fact.content[:50]}...")
         return fact_id
     
+    def get_session_turn_count(self, session_id: str) -> int:
+        """
+        Get current turn count for a session.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Number of turns in this session
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT COUNT(*) as count FROM conversations WHERE session_id = ?",
+            (session_id,)
+        )
+        
+        return cursor.fetchone()['count']
+
+    def search_conversations(
+        self,
+        query: str,
+        user_id: str,
+        session_id: str,
+        limit: int = 5
+    ) -> List[RetrievalResult]:
+        """
+        Search conversations in a specific session using FTS.
+        
+        ✅ NEW: Session-filtered conversation search
+        
+        Args:
+            query: Search query
+            user_id: User identifier
+            session_id: Session identifier (filters to THIS session only)
+            limit: Max results
+            
+        Returns:
+            List of RetrievalResult objects from THIS session
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # Clean query for FTS
+        cleaned_query = self._clean_fts_query(query)
+        if not cleaned_query:
+            return []
+        
+        # Search in conversations (session-filtered)
+        # Note: This requires conversations to be in FTS
+        # For now, we'll use LIKE search on conversations
+        cursor.execute("""
+            SELECT 
+                c.id,
+                c.user_input,
+                c.assistant_response,
+                c.session_id,
+                c.timestamp,
+                c.importance_score
+            FROM conversations c
+            WHERE (c.user_input LIKE ? OR c.assistant_response LIKE ?)
+                AND c.user_id = ?
+                AND c.session_id = ?
+                AND c.deleted_at IS NULL
+            ORDER BY c.timestamp DESC
+            LIMIT ?
+        """, (f'%{query}%', f'%{query}%', user_id, session_id, limit))
+        
+        results = []
+        for row in cursor.fetchall():
+            conv_id, user_input, assistant_response, sess_id, timestamp, importance = row
+            
+            results.append(RetrievalResult(
+                content=f"User: {user_input}\nAssistant: {assistant_response}",
+                relevance_score=0.7,  # Fixed score for LIKE search
+                conversation_id=conv_id,
+                session_id=sess_id,  # ✅ Include session_id
+                timestamp=datetime.fromisoformat(timestamp) if timestamp else None,
+                importance=importance if importance else 0.5,
+                source='sql_conversation'
+            ))
+        
+        return results
+
+    def delete_old_conversations(
+        self,
+        cutoff_date: datetime,
+        keep_factual: bool = True
+    ) -> int:
+        """
+        Delete old conversations.
+        
+        ✅ NEW: Cleanup old ephemeral conversations
+        
+        Args:
+            cutoff_date: Delete conversations before this date
+            keep_factual: Keep conversations that have associated facts
+            
+        Returns:
+            Number of deleted conversations
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        if keep_factual:
+            # Delete only ephemeral/conversational (no associated facts)
+            cursor.execute("""
+                DELETE FROM conversations
+                WHERE timestamp < ?
+                    AND deleted_at IS NULL
+                    AND id NOT IN (
+                        SELECT DISTINCT conversation_id 
+                        FROM facts
+                        WHERE conversation_id IS NOT NULL
+                    )
+            """, (cutoff_date,))
+        else:
+            # Delete all old conversations
+            cursor.execute("""
+                DELETE FROM conversations
+                WHERE timestamp < ?
+                    AND deleted_at IS NULL
+            """, (cutoff_date,))
+        
+        deleted = cursor.rowcount
+        conn.commit()
+        
+        logger.info(f"Deleted {deleted} old conversations")
+        return deleted
+
+    def get_recent_conversations_from_session(
+        self,
+        session_id: str,
+        user_id: str = "default_user",
+        limit: int = 3
+    ) -> List[RetrievalResult]:
+        """
+        Get recent conversations from a specific session.
+        
+        ✅ NEW: Helper for retrieving recent session context
+        
+        Args:
+            session_id: Session identifier
+            user_id: User identifier
+            limit: Max results
+            
+        Returns:
+            List of RetrievalResult objects
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                id,
+                user_input,
+                assistant_response,
+                session_id,
+                timestamp
+            FROM conversations
+            WHERE session_id = ?
+                AND user_id = ?
+                AND deleted_at IS NULL
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """, (session_id, user_id, limit))
+        
+        results = []
+        for row in cursor.fetchall():
+            conv_id, user_input, assistant_response, sess_id, timestamp = row
+            
+            results.append(RetrievalResult(
+                content=f"User: {user_input}\nAssistant: {assistant_response}",
+                relevance_score=0.8,  # High relevance for recency
+                conversation_id=conv_id,
+                session_id=sess_id,
+                timestamp=datetime.fromisoformat(timestamp) if timestamp else None,
+                source='recent'
+            ))
+        
+        return results
+
+    def get_all_sessions_for_user(
+        self,
+        user_id: str = "default_user",
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all sessions for a user.
+        
+        ✅ NEW: Session management helper
+        
+        Args:
+            user_id: User identifier
+            limit: Max sessions to return
+            
+        Returns:
+            List of session info dicts
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                session_id,
+                COUNT(*) as turn_count,
+                MIN(timestamp) as first_turn,
+                MAX(timestamp) as last_turn,
+                SUM(prompt_tokens + completion_tokens) as total_tokens
+            FROM conversations
+            WHERE user_id = ?
+                AND deleted_at IS NULL
+            GROUP BY session_id
+            ORDER BY MAX(timestamp) DESC
+            LIMIT ?
+        """, (user_id, limit))
+        
+        sessions = []
+        for row in cursor.fetchall():
+            sessions.append({
+                'session_id': row[0],
+                'turn_count': row[1],
+                'first_turn': row[2],
+                'last_turn': row[3],
+                'total_tokens': row[4] or 0
+            })
+        
+        return sessions
+    
     def get_conversations(
         self,
         user_id: str = "default_user",
@@ -365,16 +595,18 @@ class SQLStore(MemoryStore):
         user_id: str = "default_user",
         limit: int = 5
     ) -> List[RetrievalResult]:
-        """Search facts using FTS5"""
+        """
+        Search facts using FTS5.
+        
+        ✅ UPDATED: Now includes session_id (None for facts = shared)
+        """
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        # Clean and escape the query for FTS5
         cleaned_query = self._clean_fts_query(query)
         if not cleaned_query:
             return []
         
-        # Hybrid: FTS prefilter + recency + importance
         cursor.execute("""
             SELECT 
                 f.*,
@@ -383,8 +615,8 @@ class SQLStore(MemoryStore):
             FROM facts f
             JOIN facts_fts ON f.id = facts_fts.rowid
             WHERE facts_fts MATCH ?
-              AND f.deleted_at IS NULL
-              AND f.user_id = ?
+            AND f.deleted_at IS NULL
+            AND f.user_id = ?
             ORDER BY 
                 bm25_score DESC,
                 f.importance_score DESC,
@@ -401,6 +633,7 @@ class SQLStore(MemoryStore):
                 relevance_score=abs(row['bm25_score']) if row['bm25_score'] else 0.0,
                 fact_id=row['id'],
                 conversation_id=row['conversation_id'],
+                session_id=None,  # ✅ Facts are session-agnostic (shared)
                 category=row['category'],
                 importance=row['importance_score'],
                 created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
@@ -409,7 +642,7 @@ class SQLStore(MemoryStore):
         
         logger.debug(f"FTS search found {len(results)} results for: {query}")
         return results
-    
+
     def get_fact_by_id(self, fact_id: int) -> Optional[Fact]:
         """Get a specific fact by ID"""
         conn = self._get_connection()

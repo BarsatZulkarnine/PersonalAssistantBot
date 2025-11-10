@@ -1,7 +1,7 @@
 """
 Memory System - Base Interfaces
 
-Defines core types, enums, and interfaces for the memory system.
+FIXED: Added session_id to RetrievalResult for session isolation.
 """
 
 from abc import ABC, abstractmethod
@@ -129,15 +129,20 @@ class MemoryClassification:
 
 @dataclass
 class RetrievalResult:
-    """Result of memory retrieval"""
+    """
+    Result of memory retrieval.
+    
+    ✅ FIXED: Added session_id for session isolation
+    """
     content: str
     relevance_score: float
     fact_id: Optional[int] = None
     conversation_id: Optional[int] = None
+    session_id: Optional[str] = None  # ✅ NEW: Session tracking
     category: Optional[str] = None
     importance: float = 0.5
     created_at: Optional[datetime] = None
-    source: str = "unknown"  # 'sql', 'vector', 'hybrid'
+    source: str = "unknown"  # 'sql', 'vector', 'hybrid', 'recent'
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -146,6 +151,7 @@ class RetrievalResult:
             'relevance_score': self.relevance_score,
             'fact_id': self.fact_id,
             'conversation_id': self.conversation_id,
+            'session_id': self.session_id,  # ✅ NEW
             'category': self.category,
             'importance': self.importance,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -246,7 +252,8 @@ class VectorStore(ABC):
         self,
         query: str,
         user_id: str = "default_user",
-        limit: int = 5
+        limit: int = 5,
+        min_similarity: float = 0.0
     ) -> List[RetrievalResult]:
         """Search by semantic similarity"""
         pass

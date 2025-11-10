@@ -120,16 +120,20 @@ class ChromaVectorStore(VectorStore):
         query: str,
         user_id: str = "default_user",
         limit: int = 5,
-        min_similarity: float = 0.0
+        min_similarity: float = 0.0,
+        filter_facts_only: bool = False  # ✅ NEW: Option to filter only facts
     ) -> List[RetrievalResult]:
         """
         Search by semantic similarity.
+        
+        ✅ UPDATED: Now includes session_id in results (None for facts)
         
         Args:
             query: Search query
             user_id: Filter by user
             limit: Max results
             min_similarity: Minimum similarity threshold (0-1)
+            filter_facts_only: Only return facts (session-agnostic)
             
         Returns:
             List of RetrievalResult objects
@@ -138,11 +142,17 @@ class ChromaVectorStore(VectorStore):
             raise RuntimeError("Vector store not initialized")
         
         try:
+            # Build metadata filter
+            where_filter = {"user_id": user_id}
+            
+            if filter_facts_only:
+                where_filter["is_fact"] = "True"
+            
             # Query with metadata filter
             results = self.collection.query(
                 query_texts=[query],
                 n_results=limit,
-                where={"user_id": user_id}
+                where=where_filter
             )
             
             # Parse results
@@ -164,6 +174,7 @@ class ChromaVectorStore(VectorStore):
                         content=results['documents'][0][i],
                         relevance_score=similarity,
                         fact_id=int(metadata.get('fact_id', 0)),
+                        session_id=None,  # ✅ Facts are always session-agnostic
                         category=metadata.get('category'),
                         importance=float(metadata.get('importance', 0.5)),
                         created_at=datetime.fromisoformat(metadata['created_at']) if 'created_at' in metadata else None,
