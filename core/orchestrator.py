@@ -36,30 +36,19 @@ from core.io.output.console_output import ConsoleOutput
 logger = get_logger('orchestrator')
 
 class AssistantOrchestrator:
-    """
-    Main coordinator with AI Provider abstraction.
-    
-    NEW: Uses centralized AI provider for all AI operations.
-    """
+    """Main coordinator - wake word only when using microphone"""
     
     def __init__(
         self,
         input_mode: str = 'auto',
         output_mode: str = 'auto'
     ):
-        """
-        Initialize orchestrator.
-        
-        Args:
-            input_mode: 'auto', 'microphone', 'keyboard'
-            output_mode: 'auto', 'speaker', 'console'
-        """
         self.input_mode = input_mode
         self.output_mode = output_mode
         
         self.loader = get_module_loader()
         
-        # Hardware modules (for I/O factory)
+        # Hardware modules
         self.wake_word: Optional[WakeWordDetector] = None
         self.stt: Optional[STTProvider] = None
         self.tts: Optional[TTSProvider] = None
@@ -71,14 +60,16 @@ class AssistantOrchestrator:
         self.rag: Optional[HybridRetriever] = None
         self.conversation_service: Optional[ConversationService] = None
         
-        # NEW: AI Provider
+        # AI Provider
         self.ai_provider: Optional[AIProvider] = None
         
         # I/O interfaces
         self.audio_input: Optional[AudioInput] = None
         self.audio_output: Optional[AudioOutput] = None
         
-        # Music player reference
+        # NEW: Track if we need wake word
+        self.require_wake_word: bool = False
+        
         self.music_player = None
         
         self._initialize_modules()
@@ -88,7 +79,7 @@ class AssistantOrchestrator:
         try:
             logger.info("Initializing modules...")
             
-            # NEW: Initialize AI Provider FIRST (other modules depend on it)
+            # Initialize AI Provider
             try:
                 self.ai_provider = initialize_ai_provider()
                 logger.info(f"✅ AI Provider: {self.ai_provider.config.provider_name}/{self.ai_provider.config.model}")
@@ -98,7 +89,7 @@ class AssistantOrchestrator:
                 print(f"[FAIL] AI Provider failed: {e}")
                 raise
             
-            # Load wake word detector
+            # Load wake word detector (but might not use it)
             try:
                 self.wake_word = self.loader.load_module('wake_word')
                 logger.info(f"Wake word: {self.wake_word.__class__.__name__}")
@@ -108,7 +99,7 @@ class AssistantOrchestrator:
                 print(f"[WARN] Wake word detection disabled")
                 self.wake_word = None
             
-            # Load STT (needed for microphone input)
+            # Load STT
             try:
                 self.stt = self.loader.load_module('stt')
                 logger.info(f"STT: {self.stt.__class__.__name__}")
@@ -118,7 +109,7 @@ class AssistantOrchestrator:
                 print(f"[FAIL] STT module failed: {e}")
                 self.stt = None
             
-            # Load TTS (needed for speaker output)
+            # Load TTS
             try:
                 self.tts = self.loader.load_module('tts')
                 logger.info(f"TTS: {self.tts.__class__.__name__}")
@@ -171,37 +162,55 @@ class AssistantOrchestrator:
                 self.rag = None
             
             # Initialize ConversationService
-         # Initialize I/O via factory
             try:
-                force_voice = (self.input_mode == 'microphone' and self.output_mode == 'speaker')
-
+                self.conversation_service = ConversationService(
+                    intent_detector=self.intent,
+                    action_registry=self.actions,
+                    memory_manager=self.memory,
+                    rag_retriever=self.rag
+                )
+                logger.info("ConversationService initialized")
+                print(f"[OK] ConversationService ready")
+            except Exception as e:
+                logger.error(f"ConversationService failed: {e}")
+                print(f"[FAIL] ConversationService failed: {e}")
+                raise
+            
+            # Initialize I/O via factory
+            try:
                 self.audio_input, self.audio_output = IOFactory.create_io_pair(
                     input_mode=self.input_mode,
                     output_mode=self.output_mode,
                     stt_provider=self.stt,
                     tts_provider=self.tts,
-                    fallback=not force_voice  # voice mode should NOT silently degrade
+                    fallback=True
                 )
-
+                
                 input_caps = self.audio_input.get_capabilities()
                 output_caps = self.audio_output.get_capabilities()
-
-                # Require wake word only for microphone input
-                self.require_wake_word = (input_caps.input_type == "microphone")
-
+                
+                # ✅ FIX: Only require wake word for microphone input
+                self.require_wake_word = (input_caps.input_type == "audio")
+                
                 logger.info(
                     f"I/O initialized: "
                     f"input={self.audio_input.__class__.__name__} ({input_caps.input_type}), "
-                    f"output={self.audio_output.__class__.__name__} ({output_caps.output_type})"
+                    f"output={self.audio_output.__class__.__name__} ({output_caps.output_type}), "
+                    f"wake_word_enabled={self.require_wake_word}"
                 )
                 print(f"[OK] Input: {self.audio_input.__class__.__name__} ({input_caps.input_type})")
                 print(f"[OK] Output: {self.audio_output.__class__.__name__} ({output_caps.output_type})")
-
+                
+                # ✅ Show wake word status
+                if self.require_wake_word:
+                    print(f"[INFO] Wake word required: YES")
+                else:
+                    print(f"[INFO] Wake word required: NO (keyboard mode)")
+                
             except Exception as e:
                 logger.error(f"I/O initialization failed: {e}")
                 print(f"[FAIL] I/O initialization failed: {e}")
                 raise
-
             
             logger.info("All modules initialized successfully!")
             print("[OK] All modules initialized with AI provider abstraction!")
@@ -250,8 +259,18 @@ class AssistantOrchestrator:
                 logger.debug(f"Music resume failed: {e}")
     
     async def wait_for_wake_word(self) -> bool:
-        """Wait for wake word detection"""
+        """
+        Wait for wake word detection.
+        
+        ✅ FIX: Returns True immediately if wake word not required
+        """
+        # ✅ Skip wake word if not required (keyboard mode)
+        if not self.require_wake_word:
+            return True
+        
+        # ✅ Skip if wake word detector not available
         if not self.wake_word:
+            logger.warning("Wake word required but detector not available")
             return True
         
         try:
@@ -269,15 +288,7 @@ class AssistantOrchestrator:
             return True
     
     async def process_user_input(self, user_input: str) -> str:
-        """
-        Process user input through the service.
-        
-        Args:
-            user_input: User's text input
-            
-        Returns:
-            Response message
-        """
+        """Process user input through the service"""
         try:
             result = await self.conversation_service.process_input(user_input)
             
@@ -308,6 +319,13 @@ class AssistantOrchestrator:
         print(f"[INFO] Input: {self.audio_input.__class__.__name__}")
         print(f"[INFO] Output: {self.audio_output.__class__.__name__}")
         print(f"[INFO] AI Provider: {self.ai_provider.config.provider_name}/{self.ai_provider.config.model}")
+        
+        # ✅ Show wake word status
+        if self.require_wake_word:
+            print(f"[INFO] Wake word: ENABLED")
+        else:
+            print(f"[INFO] Wake word: DISABLED (not needed for keyboard)")
+        
         sys.stdout.flush()
         
         # Display stats
@@ -320,20 +338,27 @@ class AssistantOrchestrator:
                 rag = stats['rag']
                 print(f"[RAG] {rag['total_documents']} documents, {rag['total_chunks']} chunks")
         
+        print()  # Blank line before starting
+        sys.stdout.flush()
+        
         while True:
             try:
-                # Wait for wake word
+                # ✅ FIX: Only wait for wake word if required
                 if not await self.wait_for_wake_word():
                     continue
                 
-                # Acknowledge (only if using speaker)
-                if isinstance(self.audio_output, SpeakerOutput):
+                # Acknowledge (only if using speaker AND wake word was used)
+                if isinstance(self.audio_output, SpeakerOutput) and self.require_wake_word:
                     self.audio_output.output("Yes?")
                 
                 # Listen
                 logger.debug("Waiting for input...")
-                print("[LISTEN] Waiting for input...")
-                sys.stdout.flush()
+                if not self.require_wake_word:
+                    # Keyboard mode - no extra message needed
+                    pass
+                else:
+                    print("[LISTEN] Listening...")
+                    sys.stdout.flush()
                 
                 input_result = self.audio_input.listen()
                 
@@ -375,6 +400,7 @@ class AssistantOrchestrator:
         status = {
             'ai_provider': f"{self.ai_provider.config.provider_name}/{self.ai_provider.config.model}" if self.ai_provider else None,
             'wake_word': self.wake_word is not None,
+            'wake_word_required': self.require_wake_word,  # ✅ NEW
             'stt': self.stt is not None,
             'tts': self.tts is not None,
             'intent': self.intent is not None,
