@@ -1,5 +1,11 @@
 """
-FastAPI Main Application
+FastAPI Main Application - FIXED & MAINTAINABLE
+
+Clean structure with:
+- Single WebSocket endpoint
+- Proper service initialization
+- Event bus integration
+- Clear separation of concerns
 
 Run with: uvicorn api.main:app --reload --port 8000
 """
@@ -12,50 +18,120 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import asyncio
 import json
 from datetime import datetime
 
-from core.orchestrator import AssistantOrchestrator
+# Core imports
+from core.services.conversation_service import ConversationService
 from modules.memory.base import FactCategory
 from utils.logger import get_logger
 
+# Event bus imports
+try:
+    from core.event_bus import (
+        get_event_bus, emit_event, emit_music_event, emit_memory_event,
+        EventType, Event
+    )
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+    print("[WARN] Event bus not available - WebSocket features disabled")
+
 logger = get_logger('api.main')
 
-# Initialize FastAPI app
+# ============================================
+# FASTAPI APP SETUP
+# ============================================
+
 app = FastAPI(
     title="Voice Assistant API",
-    description="AI Voice Assistant with Memory and RAG",
-    version="3.0.0"
+    description="AI Voice Assistant with Memory, RAG, and Real-time Events",
+    version="3.1.0"
 )
 
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React/Vite dev servers
+    allow_origins=["*"],  # Configure for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize orchestrator
-orchestrator: Optional[AssistantOrchestrator] = None
+# ============================================
+# GLOBAL STATE
+# ============================================
+
+# Services
+conversation_service: Optional[ConversationService] = None
+
+# ============================================
+# STARTUP & SHUTDOWN
+# ============================================
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize orchestrator on startup"""
-    global orchestrator
-    logger.info("Starting FastAPI application...")
-    orchestrator = AssistantOrchestrator()
-    logger.info("✅ Orchestrator initialized")
+    """Initialize services on startup"""
+    global conversation_service
+    
+    try:
+        logger.info("Starting API service...")
+        
+        from core.module_loader import get_module_loader
+        from modules.actions.registry import get_action_registry
+        from modules.memory import get_memory_manager
+        from modules.rag import get_retriever
+        
+        # Load modules
+        loader = get_module_loader()
+        
+        intent = loader.load_module('intent')
+        logger.info(f"Intent: {intent.__class__.__name__}")
+        
+        actions = get_action_registry()
+        logger.info(f"Actions: {len(actions.list_actions())} loaded")
+        
+        # Optional modules
+        try:
+            memory = get_memory_manager()
+            logger.info("Memory system initialized")
+        except Exception as e:
+            logger.warning(f"Memory disabled: {e}")
+            memory = None
+        
+        try:
+            rag = get_retriever()
+            logger.info("RAG system initialized")
+        except Exception as e:
+            logger.warning(f"RAG disabled: {e}")
+            rag = None
+        
+        # Initialize conversation service
+        conversation_service = ConversationService(
+            intent_detector=intent,
+            action_registry=actions,
+            memory_manager=memory,
+            rag_retriever=rag
+        )
+        
+        logger.info("✅ API service ready")
+        print("[OK] API service initialized")
+        print(f"[OK] Event Bus: {'Enabled' if EVENT_BUS_AVAILABLE else 'Disabled'}")
+        
+    except Exception as e:
+        logger.error(f"Startup failed: {e}", exc_info=True)
+        raise
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
-    logger.info("Shutting down FastAPI application...")
+    logger.info("Shutting down API service...")
+
 
 # ============================================
 # REQUEST/RESPONSE MODELS
@@ -65,15 +141,22 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     user_id: str = "default_user"
+    client_type: str = "server"  # server, raspberry_pi, web_ui
+
 
 class ChatResponse(BaseModel):
     response: str
-    intent_type: str
+    intent: str
+    confidence: float
+    action_executed: Optional[str] = None
+    action_data: Optional[Dict[str, Any]] = None
+    memory_stored: bool = False
+    memory_category: Optional[str] = None
+    rag_used: bool = False
     duration_ms: float
     session_id: str
-    turn_no: int
-    used_memory: bool = False
-    used_rag: bool = False
+    metadata: Dict[str, Any]
+
 
 class ConversationItem(BaseModel):
     id: int
@@ -84,6 +167,7 @@ class ConversationItem(BaseModel):
     intent_type: Optional[str]
     timestamp: str
 
+
 class FactItem(BaseModel):
     id: int
     content: str
@@ -91,27 +175,12 @@ class FactItem(BaseModel):
     importance_score: float
     created_at: str
 
-class ActionItem(BaseModel):
-    id: int
-    action_name: str
-    params: Optional[Dict[str, Any]]
-    result: str
-    success: bool
-    timestamp: str
 
 class SystemStatus(BaseModel):
     status: str
-    uptime_seconds: float
-    modules: Dict[str, bool]
-    current_activity: str
-    memory_stats: Dict[str, Any]
+    features: Dict[str, bool]
+    stats: Dict[str, Any]
 
-class DocumentItem(BaseModel):
-    id: int
-    file_name: str
-    file_type: str
-    num_chunks: int
-    indexed_at: str
 
 # ============================================
 # CHAT ENDPOINTS
@@ -120,45 +189,98 @@ class DocumentItem(BaseModel):
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Send a message and get response
+    Main chat endpoint with event emission.
     
     Example:
-    ```
+    ```json
     POST /api/chat
     {
-        "message": "What's the weather like?",
-        "session_id": "abc123"
+        "message": "play jazz music",
+        "session_id": "user1_device_...",
+        "user_id": "user1",
+        "client_type": "raspberry_pi"
     }
     ```
     """
-    if not orchestrator:
-        raise HTTPException(status_code=503, detail="Orchestrator not initialized")
+    if not conversation_service:
+        raise HTTPException(status_code=503, detail="Service not ready")
     
     try:
-        start_time = datetime.now()
-        
         # Process message
-        response = await orchestrator.process_user_input(request.message)
+        result = await conversation_service.process_input(
+            user_input=request.message,
+            session_id=request.session_id,
+            user_id=request.user_id,
+            client_type=request.client_type
+        )
         
-        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+        # Emit events if event bus available
+        if EVENT_BUS_AVAILABLE:
+            await _emit_chat_events(request, result)
         
-        # Get session info
-        session_id = orchestrator.memory.session_id if orchestrator.memory else "no-session"
-        turn_no = orchestrator.memory.turn_counter if orchestrator.memory else 0
-        
+        # Return response
         return ChatResponse(
-            response=response,
-            intent_type="unknown",  # TODO: Extract from context
-            duration_ms=duration_ms,
-            session_id=session_id,
-            turn_no=turn_no,
-            used_memory=orchestrator.memory is not None,
-            used_rag=orchestrator.rag is not None
+            response=result['response'],
+            intent=result['intent'],
+            confidence=result['confidence'],
+            action_executed=result['action_executed'],
+            action_data=result.get('action_data'),
+            memory_stored=result['memory_stored'],
+            memory_category=result['memory_category'],
+            rag_used=result['rag_used'],
+            duration_ms=result['duration_ms'],
+            session_id=result['metadata']['session_id'],
+            metadata=result['metadata']
         )
         
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _emit_chat_events(request: ChatRequest, result: Dict[str, Any]):
+    """Helper: Emit events after chat processing"""
+    try:
+        # Chat event
+        await emit_event(
+            event_type=EventType.MESSAGE_RECEIVED,
+            data={
+                'message': request.message,
+                'response': result['response'],
+                'intent': result['intent']
+            },
+            session_id=request.session_id,
+            user_id=request.user_id
+        )
+        
+        # Music event
+        if result.get('action_data'):
+            action_data = result['action_data']
+            action = action_data.get('action', '')
+            
+            if action == 'play_music':
+                await emit_music_event(
+                    action='play',
+                    song_name=action_data.get('music', {}).get('name'),
+                    session_id=request.session_id
+                )
+            elif action in ['pause_music', 'stop_music', 'next_song', 'previous_song']:
+                await emit_music_event(
+                    action=action.replace('_music', '').replace('_song', ''),
+                    session_id=request.session_id
+                )
+        
+        # Memory event
+        if result.get('memory_stored'):
+            await emit_memory_event(
+                fact_content=request.message[:100],
+                category=result.get('memory_category', 'unknown'),
+                session_id=request.session_id
+            )
+    
+    except Exception as e:
+        logger.error(f"Event emission error: {e}")
+
 
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
@@ -173,19 +295,26 @@ async def chat_stream(request: ChatRequest):
     }
     ```
     """
-    if not orchestrator:
-        raise HTTPException(status_code=503, detail="Orchestrator not initialized")
+    if not conversation_service:
+        raise HTTPException(status_code=503, detail="Service not ready")
     
     async def generate():
         try:
             # Process message
-            response = await orchestrator.process_user_input(request.message)
+            result = await conversation_service.process_input(
+                user_input=request.message,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                client_type=request.client_type
+            )
+            
+            response = result['response']
             
             # Stream response word by word
             words = response.split()
             for word in words:
                 yield f"data: {json.dumps({'word': word, 'done': False})}\n\n"
-                await asyncio.sleep(0.05)  # Simulate streaming
+                await asyncio.sleep(0.05)
             
             yield f"data: {json.dumps({'word': '', 'done': True})}\n\n"
             
@@ -195,26 +324,25 @@ async def chat_stream(request: ChatRequest):
     
     return StreamingResponse(generate(), media_type="text/event-stream")
 
+
+# ============================================
+# MEMORY ENDPOINTS
+# ============================================
+
 @app.get("/api/conversations", response_model=List[ConversationItem])
 async def get_conversations(
     limit: int = 50,
     session_id: Optional[str] = None,
     user_id: str = "default_user"
 ):
-    """
-    Get conversation history
-    
-    Example:
-    ```
-    GET /api/conversations?limit=20&session_id=abc123
-    ```
-    """
-    if not orchestrator or not orchestrator.memory:
+    """Get conversation history"""
+    if not conversation_service or not conversation_service.memory:
         return []
     
     try:
-        conversations = orchestrator.memory.get_conversation_history(
+        conversations = conversation_service.memory.get_conversation_history(
             session_id=session_id,
+            user_id=user_id,
             limit=limit
         )
         
@@ -235,9 +363,6 @@ async def get_conversations(
         logger.error(f"Get conversations error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ============================================
-# MEMORY ENDPOINTS
-# ============================================
 
 @app.get("/api/memory/facts", response_model=List[FactItem])
 async def get_facts(
@@ -245,21 +370,14 @@ async def get_facts(
     category: Optional[str] = None,
     user_id: str = "default_user"
 ):
-    """
-    Get stored facts
-    
-    Example:
-    ```
-    GET /api/memory/facts?limit=10&category=personal
-    ```
-    """
-    if not orchestrator or not orchestrator.memory:
+    """Get stored facts"""
+    if not conversation_service or not conversation_service.memory:
         return []
     
     try:
         fact_category = FactCategory[category.upper()] if category else None
         
-        facts = orchestrator.memory.get_user_facts(
+        facts = conversation_service.memory.get_user_facts(
             user_id=user_id,
             category=fact_category,
             limit=limit
@@ -280,407 +398,294 @@ async def get_facts(
         logger.error(f"Get facts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/memory/search")
-async def search_memory(
-    q: str,
-    limit: int = 5,
-    user_id: str = "default_user"
-):
-    """
-    Search memory by query
-    
-    Example:
-    ```
-    GET /api/memory/search?q=birthday&limit=5
-    ```
-    """
-    if not orchestrator or not orchestrator.memory:
-        return {"results": []}
-    
-    try:
-        results = await orchestrator.memory.retrieve_context(
-            query=q,
-            user_id=user_id,
-            max_results=limit,
-            include_recent=True
-        )
-        
-        return {
-            "results": [
-                {
-                    "content": r.content,
-                    "relevance_score": r.relevance_score,
-                    "fact_id": r.fact_id,
-                    "conversation_id": r.conversation_id,
-                    "source": r.source
-                }
-                for r in results
-            ]
-        }
-        
-    except Exception as e:
-        logger.error(f"Search memory error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/memory/stats")
 async def get_memory_stats():
-    """
-    Get memory statistics
-    
-    Example:
-    ```
-    GET /api/memory/stats
-    ```
-    """
-    if not orchestrator or not orchestrator.memory:
-        return {
-            "error": "Memory system not available"
-        }
+    """Get memory statistics"""
+    if not conversation_service or not conversation_service.memory:
+        return {"error": "Memory system not available"}
     
     try:
-        stats = orchestrator.memory.get_stats()
+        stats = conversation_service.memory.get_stats()
         return stats
-        
     except Exception as e:
         logger.error(f"Get memory stats error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ============================================
-# ACTION ENDPOINTS
-# ============================================
-
-@app.get("/api/actions/list")
-async def list_actions():
-    """
-    Get list of available actions
-    
-    Example:
-    ```
-    GET /api/actions/list
-    ```
-    """
-    if not orchestrator or not orchestrator.actions:
-        return {"actions": []}
-    
-    try:
-        actions = orchestrator.actions.get_all_actions()
-        
-        return {
-            "actions": [
-                {
-                    "name": action.name,
-                    "category": action.category.value,
-                    "enabled": action.enabled,
-                    "description": action.description,
-                    "security_level": action.security_level.value
-                }
-                for action in actions.values()
-            ]
-        }
-        
-    except Exception as e:
-        logger.error(f"List actions error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/actions/execute")
-async def execute_action(
-    action_name: str,
-    prompt: str,
-    params: Optional[Dict[str, Any]] = None
-):
-    """
-    Execute an action manually
-    
-    Example:
-    ```
-    POST /api/actions/execute
-    {
-        "action_name": "MusicAction",
-        "prompt": "play jazz",
-        "params": {}
-    }
-    ```
-    """
-    if not orchestrator or not orchestrator.actions:
-        raise HTTPException(status_code=503, detail="Actions not available")
-    
-    try:
-        result = await orchestrator.actions.execute_action(
-            action_name=action_name,
-            prompt=prompt,
-            params=params
-        )
-        
-        return {
-            "success": result.success,
-            "message": result.message,
-            "data": result.data
-        }
-        
-    except Exception as e:
-        logger.error(f"Execute action error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================
-# SYSTEM MONITORING ENDPOINTS
+# MUSIC ENDPOINTS
 # ============================================
 
-@app.get("/api/system/status", response_model=SystemStatus)
-async def get_system_status():
+@app.get("/api/music/stream/{song_name}")
+async def stream_music(song_name: str):
     """
-    Get system status
+    Stream local music file to client.
     
-    Example:
-    ```
-    GET /api/system/status
-    ```
+    Usage: Pi/UI requests this URL for playback
     """
-    if not orchestrator:
-        raise HTTPException(status_code=503, detail="System not ready")
-    
-    try:
-        status = orchestrator.get_status()
-        
-        # Get memory stats
-        memory_stats = {}
-        if orchestrator.memory:
-            memory_stats = orchestrator.memory.get_stats()
-        
-        return SystemStatus(
-            status="active",
-            uptime_seconds=0,  # TODO: Track uptime
-            modules={
-                "wake_word": status.get('wake_word', False),
-                "stt": status.get('stt', False),
-                "tts": status.get('tts', False),
-                "intent": status.get('intent', False),
-                "actions": status.get('actions', 0) > 0,
-                "memory": status.get('memory', False),
-                "rag": status.get('rag', False)
-            },
-            current_activity="idle",  # TODO: Track current activity
-            memory_stats=memory_stats
-        )
-        
-    except Exception as e:
-        logger.error(f"Get system status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/analytics/intents")
-async def get_intent_analytics(period: str = "7d"):
-    """
-    Get intent breakdown analytics
-    
-    Example:
-    ```
-    GET /api/analytics/intents?period=7d
-    ```
-    """
-    # TODO: Implement intent analytics
-    return {
-        "intents": {
-            "AI": 65,
-            "Web": 20,
-            "Action": 15
-        },
-        "period": period
-    }
-
-@app.get("/api/music/status")
-async def get_music_status():
-    """
-    Get music player status
-    
-    Example:
-    ```
-    GET /api/music/status
-    ```
-    """
-    if not orchestrator:
-        return {"error": "System not ready"}
+    if not conversation_service:
+        raise HTTPException(status_code=503, detail="Service not ready")
     
     try:
         # Find music action
-        if orchestrator.actions:
-            for action in orchestrator.actions.get_all_actions().values():
-                if action.name == "MusicAction" and hasattr(action, 'player'):
-                    status = action.player.get_status()
-                    return status
+        music_action = None
+        for action in conversation_service.actions.get_all_actions().values():
+            if action.name == "MusicAction" and hasattr(action, 'player'):
+                music_action = action
+                break
+        
+        if not music_action or not music_action.player:
+            raise HTTPException(status_code=503, detail="Music player not available")
+        
+        # Find song
+        song = music_action.player._find_song(song_name)
+        
+        if not song:
+            raise HTTPException(status_code=404, detail="Song not found")
+        
+        # Stream file
+        file_path = Path(song.path)
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        return FileResponse(
+            path=str(file_path),
+            media_type="audio/mpeg",
+            filename=file_path.name
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Music streaming error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/music/status")
+async def get_music_status():
+    """Get current music player status"""
+    if not conversation_service:
+        return {"error": "Service not ready"}
+    
+    try:
+        for action in conversation_service.actions.get_all_actions().values():
+            if action.name == "MusicAction" and hasattr(action, 'player'):
+                status = action.player.get_status()
+                return status
         
         return {"status": "not_available"}
         
     except Exception as e:
-        logger.error(f"Get music status error: {e}")
+        logger.error(f"Music status error: {e}")
         return {"error": str(e)}
 
-# ============================================
-# RAG/DOCUMENT ENDPOINTS
-# ============================================
-
-@app.get("/api/documents", response_model=List[DocumentItem])
-async def get_documents(limit: int = 20):
-    """
-    Get indexed documents
-    
-    Example:
-    ```
-    GET /api/documents?limit=10
-    ```
-    """
-    if not orchestrator or not orchestrator.rag:
-        return []
-    
-    try:
-        from modules.rag import get_indexer
-        indexer = get_indexer()
-        
-        stats = indexer.get_stats()
-        
-        # TODO: Implement actual document listing
-        # For now, return stats
-        return []
-        
-    except Exception as e:
-        logger.error(f"Get documents error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/documents/search")
-async def search_documents(q: str, limit: int = 5):
-    """
-    Search documents
-    
-    Example:
-    ```
-    GET /api/documents/search?q=project+deadline&limit=5
-    ```
-    """
-    if not orchestrator or not orchestrator.rag:
-        return {"results": []}
-    
-    try:
-        results = await orchestrator.rag.retrieve(
-            query=q,
-            top_k=limit
-        )
-        
-        return {
-            "results": [
-                {
-                    "content": r.content,
-                    "document_name": r.document_name,
-                    "relevance_score": r.relevance_score,
-                    "chunk_index": r.chunk_index
-                }
-                for r in results
-            ]
-        }
-        
-    except Exception as e:
-        logger.error(f"Search documents error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================
 # WEBSOCKET ENDPOINT
 # ============================================
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except:
-                pass
-
-manager = ConnectionManager()
-
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    session_id: Optional[str] = None,
+    user_id: str = "default_user",
+    client_type: str = "unknown"
+):
     """
-    WebSocket for real-time updates
+    WebSocket for real-time events.
     
-    Example messages:
-    - System status updates
-    - New messages
-    - Action executions
-    - Memory updates
+    Usage:
+    ```javascript
+    const ws = new WebSocket('ws://localhost:8000/ws?session_id=abc&user_id=user1');
+    
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log('Event:', data.type, data.data);
+    };
+    ```
     """
-    await manager.connect(websocket)
+    if not EVENT_BUS_AVAILABLE:
+        await websocket.close(code=1011, reason="Event bus not available")
+        return
+    
+    if not conversation_service:
+        await websocket.close(code=1011, reason="Service not ready")
+        return
+    
+    event_bus = get_event_bus()
+    
+    # Generate session_id if not provided
+    if not session_id:
+        import uuid
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        short_uuid = str(uuid.uuid4())[:8]
+        session_id = f"{user_id}_{timestamp}_{short_uuid}"
     
     try:
+        # Connect to event bus
+        await event_bus.connect(
+            websocket=websocket,
+            session_id=session_id,
+            user_id=user_id,
+            client_type=client_type
+        )
+        
+        logger.info(f"WebSocket connected: {session_id[:20]}...")
+        
+        # Listen for messages
         while True:
-            data = await websocket.receive_text()
-            
-            # Parse message
             try:
+                data = await websocket.receive_text()
                 message = json.loads(data)
-                msg_type = message.get("type")
                 
-                if msg_type == "ping":
-                    await websocket.send_json({"type": "pong"})
+                msg_type = message.get('type')
                 
-                elif msg_type == "chat":
-                    # Process chat message
-                    response = await orchestrator.process_user_input(message.get("message", ""))
-                    await websocket.send_json({
-                        "type": "chat_response",
-                        "response": response
-                    })
+                if msg_type == 'ping':
+                    # Heartbeat
+                    await websocket.send_text(json.dumps({
+                        'type': 'pong',
+                        'timestamp': datetime.now().isoformat()
+                    }))
+                
+                elif msg_type == 'subscribe':
+                    # Subscribe to event types
+                    event_types = message.get('events', [])
+                    event_enum = {EventType[e] for e in event_types if e in EventType.__members__}
+                    event_bus.subscribe(session_id, event_enum)
+                    
+                    await websocket.send_text(json.dumps({
+                        'type': 'subscribed',
+                        'events': event_types
+                    }))
+                
+                elif msg_type == 'unsubscribe':
+                    # Unsubscribe
+                    event_types = message.get('events', [])
+                    event_enum = {EventType[e] for e in event_types if e in EventType.__members__}
+                    event_bus.unsubscribe(session_id, event_enum)
+                
+                elif msg_type == 'chat':
+                    # Chat via WebSocket
+                    user_message = message.get('message')
+                    
+                    if user_message:
+                        result = await conversation_service.process_input(
+                            user_input=user_message,
+                            session_id=session_id,
+                            user_id=user_id,
+                            client_type=client_type
+                        )
+                        
+                        # Send response via WebSocket
+                        await websocket.send_text(json.dumps({
+                            'type': 'chat_response',
+                            'response': result['response'],
+                            'action_data': result.get('action_data')
+                        }))
+                        
+                        # Emit events
+                        await _emit_chat_events(
+                            ChatRequest(
+                                message=user_message,
+                                session_id=session_id,
+                                user_id=user_id,
+                                client_type=client_type
+                            ),
+                            result
+                        )
                 
                 else:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": f"Unknown message type: {msg_type}"
-                    })
-                    
+                    await websocket.send_text(json.dumps({
+                        'type': 'error',
+                        'message': f'Unknown message type: {msg_type}'
+                    }))
+            
             except json.JSONDecodeError:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Invalid JSON"
-                })
-                
+                await websocket.send_text(json.dumps({
+                    'type': 'error',
+                    'message': 'Invalid JSON'
+                }))
+    
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        logger.info("WebSocket disconnected")
+        logger.info(f"WebSocket disconnected: {session_id[:20]}...")
+        event_bus.disconnect(websocket)
+    
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}", exc_info=True)
+        event_bus.disconnect(websocket)
+
+
+@app.get("/api/events/stats")
+async def get_event_stats():
+    """Get event bus statistics"""
+    if not EVENT_BUS_AVAILABLE:
+        return {"error": "Event bus not available"}
+    
+    event_bus = get_event_bus()
+    return event_bus.get_stats()
+
 
 # ============================================
-# HEALTH CHECK
+# SYSTEM ENDPOINTS
 # ============================================
+
+@app.get("/api/system/status", response_model=SystemStatus)
+async def get_system_status():
+    """Get system status"""
+    if not conversation_service:
+        raise HTTPException(status_code=503, detail="System not ready")
+    
+    try:
+        stats = conversation_service.get_stats()
+        
+        return SystemStatus(
+            status="active",
+            features={
+                "conversation": True,
+                "memory": stats.get('memory_enabled', False),
+                "rag": stats.get('rag_enabled', False),
+                "event_bus": EVENT_BUS_AVAILABLE,
+                "music_streaming": True,
+                "session_isolation": True
+            },
+            stats=stats
+        )
+        
+    except Exception as e:
+        logger.error(f"Status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/health")
 async def health_check():
-    """
-    Health check endpoint
-    
-    Example:
-    ```
-    GET /health
-    ```
-    """
+    """Health check"""
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "orchestrator_ready": orchestrator is not None
+        "service_ready": conversation_service is not None,
+        "event_bus": EVENT_BUS_AVAILABLE
     }
+
 
 @app.get("/")
 async def root():
-    """Root endpoint with API info"""
+    """Root endpoint"""
     return {
         "name": "Voice Assistant API",
-        "version": "3.0.0",
+        "version": "3.1.0",
+        "features": [
+            "Multi-client chat",
+            "Session isolation",
+            "Memory & RAG",
+            "Music streaming",
+            "Real-time events (WebSocket)" if EVENT_BUS_AVAILABLE else "WebSocket unavailable"
+        ],
         "docs": "/docs",
         "health": "/health"
     }
+
 
 if __name__ == "__main__":
     import uvicorn

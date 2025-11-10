@@ -116,6 +116,7 @@ class ChromaVectorStore(VectorStore):
             raise
     
     def search(
+        
         self,
         query: str,
         user_id: str = "default_user",
@@ -142,18 +143,12 @@ class ChromaVectorStore(VectorStore):
             raise RuntimeError("Vector store not initialized")
         
         try:
-            # Build metadata filter
-            where_filter = {"user_id": user_id}
-            
-            if filter_facts_only:
-                where_filter["is_fact"] = "True"
-            
-            # Query with metadata filter
+            # Query with simple user filter
             results = self.collection.query(
                 query_texts=[query],
                 n_results=limit,
-                where=where_filter
-            )
+                where={"user_id": user_id}  # ✅ Simple, works
+        )
             
             # Parse results
             retrieval_results = []

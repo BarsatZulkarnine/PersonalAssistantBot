@@ -1,10 +1,10 @@
 """
-Conversation Service - UPDATED FOR CLIENT AWARENESS
+Conversation Service - WITH SESSION ISOLATION
 
-Key changes:
-- Accepts client_type parameter
-- Passes client_type to actions
-- Returns action_data in response
+FIXED: Each session (device) maintains isolated conversation history.
+- Desktop session won't see Raspberry Pi's conversation
+- Raspberry Pi session won't see Desktop's conversation
+- Shared memories (facts) are still accessible across sessions
 """
 
 import time
@@ -22,7 +22,15 @@ logger = get_logger('conversation_service')
 
 
 class ConversationService:
-    """Session-aware conversation service with client support"""
+    """
+    Session-aware conversation service.
+    
+    Key changes:
+    - session_id is now REQUIRED for proper isolation
+    - Auto-generates session_id if not provided
+    - Passes session_id through entire pipeline
+    - Memory retrieval filters by session
+    """
     
     def __init__(
         self,
@@ -36,7 +44,7 @@ class ConversationService:
         self.memory = memory_manager
         self.rag = rag_retriever
         
-        logger.info("ConversationService initialized (client-aware)")
+        logger.info("ConversationService initialized (session-aware)")
     
     def _generate_session_id(self, user_id: str) -> str:
         """Generate unique session ID"""
@@ -48,41 +56,44 @@ class ConversationService:
         self,
         user_input: str,
         session_id: Optional[str] = None,
-        user_id: str = "default_user",
-        client_type: str = "server"  # ✅ NEW PARAMETER
+        user_id: str = "default_user"
     ) -> Dict[str, Any]:
         """
-        Process user input with client awareness.
+        Process user input with session isolation.
+        
+        ✅ NEW: If session_id not provided, generates one
+        ✅ NEW: Passes session_id through entire pipeline
+        ✅ NEW: Memory retrieval is session-aware
         
         Args:
             user_input: User's text input
-            session_id: Session identifier
+            session_id: Session identifier (device/conversation)
             user_id: User identifier
-            client_type: Client type (server, raspberry_pi, web_ui)
         
         Returns:
-            Response with action_data included
+            Response with session info included
         """
         start_time = time.time()
         
-        # Generate session ID if not provided
+        # ✅ Generate session ID if not provided
         if not session_id:
             session_id = self._generate_session_id(user_id)
             logger.info(f"Generated new session: {session_id}")
         
         try:
-            logger.info(f"[{session_id}] Processing: {user_input[:50]}... (client={client_type})")
+            logger.info(f"[{session_id}] Processing: {user_input[:50]}...")
             
-            # Step 1: Retrieve Memory Context
+            # Step 1: Retrieve Memory Context (SESSION-AWARE)
             memory_context = ""
             memory_results = []
             if self.memory:
                 try:
                     logger.debug(f"[{session_id}] Retrieving memory context...")
                     
+                    # ✅ FIX: Pass session_id to filter by session
                     memory_results = await self.memory.retrieve_context(
                         query=user_input,
-                        session_id=session_id,
+                        session_id=session_id,  # ✅ NEW: Filter by session
                         user_id=user_id,
                         max_results=3,
                         include_recent=True
@@ -100,7 +111,7 @@ class ConversationService:
                 except Exception as e:
                     logger.error(f"[{session_id}] Memory retrieval error: {e}")
             
-            # Step 2: Search RAG Documents
+            # Step 2: Search RAG Documents (session-agnostic - shared docs)
             rag_context = ""
             rag_results = []
             if self.rag:
@@ -118,7 +129,7 @@ class ConversationService:
                         )
                         logger.info(
                             f"[{session_id}] Retrieved {len(rag_results)} "
-                            f"document chunks"
+                            f"document chunks (shared)"
                         )
                 except Exception as e:
                     logger.error(f"[{session_id}] RAG retrieval error: {e}")
@@ -136,13 +147,11 @@ class ConversationService:
             # Step 4: Route Based on Intent
             response = ""
             action_executed = None
-            action_data = None  # ✅ NEW: Store action data
             
             if intent_type == IntentType.ACTION:
-                response, action_executed, action_data = await self._handle_action(
+                response, action_executed = await self._handle_action(
                     user_input, 
-                    session_id,
-                    client_type  # ✅ PASS CLIENT TYPE
+                    session_id
                 )
             
             elif intent_type == IntentType.WEB:
@@ -152,7 +161,7 @@ class ConversationService:
                     session_id
                 )
             
-            else:  # IntentType.AI
+            else:  # IntentType.AI / Conversation
                 response = await self._handle_conversation(
                     user_input,
                     memory_context,
@@ -162,18 +171,19 @@ class ConversationService:
             
             duration_ms = (time.time() - start_time) * 1000
             
-            # Step 5: Store in Memory
+            # Step 5: Store in Memory (SESSION-AWARE)
             memory_stored = False
             memory_category = None
             if self.memory:
                 try:
                     logger.debug(f"[{session_id}] Storing conversation in memory...")
                     
+                    # ✅ FIX: Pass session_id when storing
                     classification = await self.memory.process_conversation(
                         user_input=user_input,
                         assistant_response=response,
-                        session_id=session_id,
-                        user_id=user_id,
+                        session_id=session_id,  # ✅ NEW
+                        user_id=user_id,        # ✅ NEW
                         intent_type=intent_type.value,
                         duration_ms=duration_ms,
                         prompt_tokens=0,
@@ -193,21 +203,19 @@ class ConversationService:
             # Log conversation
             log_conversation(user_input, response)
             
-            # ✅ RETURN ENHANCED RESULT
+            # Return structured result
             result = {
                 'response': response,
                 'intent': intent_type.value,
                 'confidence': intent_result.confidence,
                 'action_executed': action_executed,
-                'action_data': action_data,  # ✅ NEW: Action-specific data
                 'memory_stored': memory_stored,
                 'memory_category': memory_category,
                 'rag_used': bool(rag_results),
                 'duration_ms': duration_ms,
                 'metadata': {
-                    'session_id': session_id,
+                    'session_id': session_id,  # ✅ Return session ID
                     'user_id': user_id,
-                    'client_type': client_type,  # ✅ NEW
                     'memory_results': len(memory_results),
                     'rag_results': len(rag_results)
                 }
@@ -227,7 +235,6 @@ class ConversationService:
                 'intent': 'error',
                 'confidence': 0.0,
                 'action_executed': None,
-                'action_data': None,
                 'memory_stored': False,
                 'memory_category': None,
                 'rag_used': False,
@@ -235,7 +242,6 @@ class ConversationService:
                 'metadata': {
                     'session_id': session_id,
                     'user_id': user_id,
-                    'client_type': client_type,
                     'error': str(e)
                 }
             }
@@ -243,36 +249,26 @@ class ConversationService:
     async def _handle_action(
         self, 
         user_input: str,
-        session_id: str,
-        client_type: str  # ✅ NEW PARAMETER
-    ) -> tuple[str, Optional[str], Optional[Dict]]:
-        """
-        Handle action execution with client awareness.
-        
-        Returns:
-            (response_text, action_name, action_data)
-        """
+        session_id: str
+    ) -> tuple[str, Optional[str]]:
+        """Handle action execution"""
         logger.debug(f"[{session_id}] Finding action...")
         
         action = self.actions.find_action_for_prompt(user_input)
         
         if not action:
             logger.warning(f"[{session_id}] No matching action found")
-            return ("I'm not sure how to do that.", None, None)
+            return ("I'm not sure how to do that.", None)
         
         logger.info(f"[{session_id}] Executing action: {action.name}")
-        
-        # ✅ PASS CLIENT TYPE TO ACTION
-        params = {'client_type': client_type}
-        result = await action.execute(user_input, params=params)
+        result = await action.execute(user_input)
         
         if result.success:
             logger.info(f"[{session_id}] Action completed: {action.name}")
         else:
             logger.warning(f"[{session_id}] Action failed: {result.message}")
         
-        # ✅ RETURN ACTION DATA
-        return (result.message, action.name, result.data)
+        return (result.message, action.name)
     
     async def _handle_web_search(
         self, 
@@ -351,8 +347,7 @@ class ConversationService:
             'actions_available': len(self.actions.list_actions()),
             'memory_enabled': self.memory is not None,
             'rag_enabled': self.rag is not None,
-            'session_aware': True,
-            'client_aware': True  # ✅ NEW
+            'session_aware': True  # ✅ NEW
         }
         
         if self.memory:

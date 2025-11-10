@@ -46,3 +46,16 @@ Thumbs.db
 *.local.yaml
 config/*.local.yaml
 .env.local
+
+# Event bus runtime
+core/event_bus/__pycache__/
+
+# Client caches
+clients/raspberry_pi/*.mp3
+clients/raspberry_pi/.env
+clients/test/__pycache__/
+
+# Web client
+clients/web/node_modules/
+clients/web/.next/
+clients/web/out/

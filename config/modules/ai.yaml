@@ -15,7 +15,7 @@ openai:
 
 # Ollama Configuration (Local LLMs)
 ollama:
-  model: "llama3"  # llama3, mistral, phi, gemma, etc.
+  model: "qwen2.5:7b-instruct"  # llama3, mistral, phi, gemma, etc.
   base_url: "http://localhost:11434"  # Ollama server URL
   temperature: 0.7
   max_tokens: 500

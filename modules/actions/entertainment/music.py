@@ -1,7 +1,11 @@
 """
-Music Player Action
+Music Action - REFACTORED FOR CLIENT-AWARENESS
 
-Voice commands for music playback.
+Now supports:
+- Server playback (CLI mode)
+- Client playback (API mode - returns stream info)
+- YouTube streaming
+- Local file streaming
 """
 
 import yaml
@@ -14,22 +18,22 @@ from utils.logger import get_logger
 logger = get_logger('actions.music')
 
 class MusicAction(Action):
-    """Music playback control"""
+    """Client-aware music playback control"""
     
     def __init__(self):
         super().__init__()
-        self.category = ActionCategory.SYSTEM  # or create ENTERTAINMENT category
+        self.category = ActionCategory.ENTERTAINMENT
         self.security_level = SecurityLevel.SAFE
         self.description = "Play and control music"
         
         # Load config
         config = self._load_config()
         
-        # Initialize player
+        # Initialize player (still needed for server playback)
         try:
             self.player = MusicPlayer(config)
             self.enabled = True
-            logger.info("[OK] Music action initialized")
+            logger.info("[OK] Music action initialized (client-aware)")
         except Exception as e:
             logger.error(f"[FAIL] Music player init failed: {e}")
             self.player = None
@@ -56,51 +60,25 @@ class MusicAction(Action):
     
     def get_intents(self) -> List[str]:
         return [
-            # Play commands - MUST BE FIRST for priority matching
             "play",
             "play music",
             "play song",
-            "play ",  # Catches "play [anything]"
-            "start music",
-            
-            # Control commands
             "pause",
-            "pause music",
             "resume",
-            "resume music",
-            "stop music",
             "stop",
-            
-            # Navigation
-            "next song",
             "next",
-            "skip",
-            "previous song",
             "previous",
-            "back",
-            
-            # Queue
-            "add to queue",
-            "queue",
-            "clear queue",
-            
-            # Settings
-            "shuffle",
-            "louder",
-            "quieter",
-            
-            # Status
-            "what's playing",
-            "current song"
+            "volume up",
+            "volume down",
+            "what's playing"
         ]
     
     def matches(self, prompt: str) -> bool:
         """Custom matching for music commands"""
         prompt_lower = prompt.lower()
         
-        # Priority: Check if it starts with "play" (but not "play with", "play around")
+        # Priority: Check if it starts with "play"
         if prompt_lower.startswith("play ") and len(prompt_lower) > 5:
-            # Check it's not something else
             if not any(word in prompt_lower for word in ["play with", "play around", "play a game"]):
                 return True
         
@@ -118,87 +96,56 @@ class MusicAction(Action):
                 message="Music player not available"
             )
         
+        # Extract client type
+        client_type = params.get('client_type', 'server') if params else 'server'
+        
         prompt_lower = prompt.lower()
         
-        print(f"[MUSIC] Command: {prompt}")
+        print(f"[MUSIC] Command: {prompt} (client={client_type})")
         
         try:
-            # Play commands
+            # ============================================
+            # PLAY COMMANDS
+            # ============================================
             if any(cmd in prompt_lower for cmd in ["play music", "start music"]):
-                result = self.player.play()
-                return ActionResult(success=True, message=result)
+                return await self._handle_play(None, client_type)
             
-            # Play specific song
             elif prompt_lower.startswith("play "):
-                query = prompt[5:].strip()  # Remove "play "
-                result = self.player.play(query)
-                return ActionResult(success=True, message=result)
+                query = prompt[5:].strip()
+                return await self._handle_play(query, client_type)
             
-            # Pause
+            # ============================================
+            # CONTROL COMMANDS
+            # ============================================
             elif "pause" in prompt_lower:
-                result = self.player.pause()
-                return ActionResult(success=True, message=result)
+                return self._handle_pause(client_type)
             
-            # Resume
-            elif "resume" in prompt_lower or "unpause" in prompt_lower or "continue" in prompt_lower:
-                result = self.player.resume()
-                return ActionResult(success=True, message=result)
+            elif "resume" in prompt_lower or "continue" in prompt_lower:
+                return self._handle_resume(client_type)
             
-            # Stop
             elif "stop" in prompt_lower:
-                result = self.player.stop()
-                return ActionResult(success=True, message=result)
+                return self._handle_stop(client_type)
             
-            # Next
             elif "next" in prompt_lower or "skip" in prompt_lower:
-                result = self.player.next()
-                return ActionResult(success=True, message=result)
+                return self._handle_next(client_type)
             
-            # Previous
             elif "previous" in prompt_lower or "back" in prompt_lower:
-                result = self.player.previous()
-                return ActionResult(success=True, message=result)
+                return self._handle_previous(client_type)
             
-            # Volume
+            # ============================================
+            # VOLUME COMMANDS
+            # ============================================
             elif "louder" in prompt_lower or ("volume" in prompt_lower and "up" in prompt_lower):
-                result = self.player.volume_up()
-                return ActionResult(success=True, message=result)
+                return self._handle_volume_up(client_type)
             
             elif "quieter" in prompt_lower or ("volume" in prompt_lower and "down" in prompt_lower):
-                result = self.player.volume_down()
-                return ActionResult(success=True, message=result)
+                return self._handle_volume_down(client_type)
             
-            # Shuffle
-            elif "shuffle" in prompt_lower:
-                result = self.player.toggle_shuffle()
-                return ActionResult(success=True, message=result)
-            
-            # Queue
-            elif "add to queue" in prompt_lower or "queue" in prompt_lower:
-                query = prompt_lower.replace("add to queue", "").replace("queue", "").strip()
-                if query:
-                    result = self.player.add_to_queue(query)
-                    return ActionResult(success=True, message=result)
-                else:
-                    return ActionResult(success=False, message="What should I add to queue?")
-            
-            elif "clear queue" in prompt_lower:
-                result = self.player.clear_queue()
-                return ActionResult(success=True, message=result)
-            
-            # Status
+            # ============================================
+            # STATUS COMMANDS
+            # ============================================
             elif "what's playing" in prompt_lower or "current song" in prompt_lower:
-                status = self.player.get_status()
-                if status['current_song']:
-                    return ActionResult(
-                        success=True,
-                        message=f"Playing: {status['current_song']}"
-                    )
-                else:
-                    return ActionResult(
-                        success=True,
-                        message="Nothing is playing"
-                    )
+                return self._handle_status(client_type)
             
             else:
                 return ActionResult(
@@ -212,3 +159,195 @@ class MusicAction(Action):
                 success=False,
                 message=f"Music error: {str(e)}"
             )
+    
+    # ============================================
+    # COMMAND HANDLERS
+    # ============================================
+    
+    async def _handle_play(self, query: Optional[str], client_type: str) -> ActionResult:
+        """Handle play command"""
+        
+        # Get song info
+        if query:
+            song_info = self._get_song_info(query)
+        else:
+            song_info = self._get_random_song_info()
+        
+        if not song_info:
+            return ActionResult(
+                success=False,
+                message=f"Could not find '{query}'" if query else "No songs available"
+            )
+        
+        # CLIENT-AWARE LOGIC
+        if client_type == "server":
+            # Play on server (current behavior)
+            result = self.player.play(query)
+            return ActionResult(
+                success=True,
+                message=result
+            )
+        
+        else:
+            # Return playback info for client
+            return ActionResult(
+                success=True,
+                message=f"Now playing {song_info['name']}",
+                data={
+                    'action': 'play_music',
+                    'music': song_info
+                }
+            )
+    
+    def _handle_pause(self, client_type: str) -> ActionResult:
+        """Handle pause command"""
+        if client_type == "server":
+            result = self.player.pause()
+            return ActionResult(success=True, message=result)
+        else:
+            return ActionResult(
+                success=True,
+                message="Music paused",
+                data={'action': 'pause_music'}
+            )
+    
+    def _handle_resume(self, client_type: str) -> ActionResult:
+        """Handle resume command"""
+        if client_type == "server":
+            result = self.player.resume()
+            return ActionResult(success=True, message=result)
+        else:
+            return ActionResult(
+                success=True,
+                message="Music resumed",
+                data={'action': 'resume_music'}
+            )
+    
+    def _handle_stop(self, client_type: str) -> ActionResult:
+        """Handle stop command"""
+        if client_type == "server":
+            result = self.player.stop()
+            return ActionResult(success=True, message=result)
+        else:
+            return ActionResult(
+                success=True,
+                message="Music stopped",
+                data={'action': 'stop_music'}
+            )
+    
+    def _handle_next(self, client_type: str) -> ActionResult:
+        """Handle next command"""
+        if client_type == "server":
+            result = self.player.next()
+            return ActionResult(success=True, message=result)
+        else:
+            return ActionResult(
+                success=True,
+                message="Skipped to next song",
+                data={'action': 'next_song'}
+            )
+    
+    def _handle_previous(self, client_type: str) -> ActionResult:
+        """Handle previous command"""
+        if client_type == "server":
+            result = self.player.previous()
+            return ActionResult(success=True, message=result)
+        else:
+            return ActionResult(
+                success=True,
+                message="Playing previous song",
+                data={'action': 'previous_song'}
+            )
+    
+    def _handle_volume_up(self, client_type: str) -> ActionResult:
+        """Handle volume up"""
+        if client_type == "server":
+            result = self.player.volume_up()
+            return ActionResult(success=True, message=result)
+        else:
+            return ActionResult(
+                success=True,
+                message="Volume increased",
+                data={'action': 'volume_change', 'direction': 'up'}
+            )
+    
+    def _handle_volume_down(self, client_type: str) -> ActionResult:
+        """Handle volume down"""
+        if client_type == "server":
+            result = self.player.volume_down()
+            return ActionResult(success=True, message=result)
+        else:
+            return ActionResult(
+                success=True,
+                message="Volume decreased",
+                data={'action': 'volume_change', 'direction': 'down'}
+            )
+    
+    def _handle_status(self, client_type: str) -> ActionResult:
+        """Handle status request"""
+        status = self.player.get_status()
+        
+        if status['current_song']:
+            message = f"Playing: {status['current_song']}"
+        else:
+            message = "Nothing is playing"
+        
+        return ActionResult(
+            success=True,
+            message=message,
+            data={'status': status}
+        )
+    
+    # ============================================
+    # SONG INFO HELPERS
+    # ============================================
+    
+    def _get_song_info(self, query: str) -> Optional[Dict[str, Any]]:
+        """Get song information for playback"""
+        
+        # Check local library first
+        song = self.player._find_song(query)
+        
+        if song:
+            return {
+                'type': 'local',
+                'name': song.name,
+                'path': song.path,
+                'stream_url': f"/api/music/stream/{song.name}",
+                'source': 'local'
+            }
+        
+        # Try YouTube
+        if self.player.youtube and self.player.youtube.available:
+            try:
+                info = self.player.youtube._get_video_info(query)
+                
+                if info:
+                    return {
+                        'type': 'youtube',
+                        'name': info.get('title', query),
+                        'video_id': info.get('id'),
+                        'stream_url': info.get('url'),
+                        'duration': info.get('duration', 0),
+                        'source': 'youtube'
+                    }
+            except Exception as e:
+                logger.error(f"YouTube info error: {e}")
+        
+        return None
+    
+    def _get_random_song_info(self) -> Optional[Dict[str, Any]]:
+        """Get random song info"""
+        if not self.player.library:
+            return None
+        
+        import random
+        song = random.choice(self.player.library)
+        
+        return {
+            'type': 'local',
+            'name': song.name,
+            'path': song.path,
+            'stream_url': f"/api/music/stream/{song.name}",
+            'source': 'local'
+        }

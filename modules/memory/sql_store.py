@@ -320,20 +320,7 @@ class SQLStore(MemoryStore):
         session_id: str,
         limit: int = 5
     ) -> List[RetrievalResult]:
-        """
-        Search conversations in a specific session using FTS.
-        
-        ✅ NEW: Session-filtered conversation search
-        
-        Args:
-            query: Search query
-            user_id: User identifier
-            session_id: Session identifier (filters to THIS session only)
-            limit: Max results
-            
-        Returns:
-            List of RetrievalResult objects from THIS session
-        """
+        """Search conversations in a specific session using FTS."""
         conn = self._get_connection()
         cursor = conn.cursor()
         
@@ -343,16 +330,13 @@ class SQLStore(MemoryStore):
             return []
         
         # Search in conversations (session-filtered)
-        # Note: This requires conversations to be in FTS
-        # For now, we'll use LIKE search on conversations
         cursor.execute("""
             SELECT 
                 c.id,
                 c.user_input,
                 c.assistant_response,
                 c.session_id,
-                c.timestamp,
-                c.importance_score
+                c.timestamp
             FROM conversations c
             WHERE (c.user_input LIKE ? OR c.assistant_response LIKE ?)
                 AND c.user_id = ?
@@ -364,15 +348,13 @@ class SQLStore(MemoryStore):
         
         results = []
         for row in cursor.fetchall():
-            conv_id, user_input, assistant_response, sess_id, timestamp, importance = row
-            
             results.append(RetrievalResult(
-                content=f"User: {user_input}\nAssistant: {assistant_response}",
-                relevance_score=0.7,  # Fixed score for LIKE search
-                conversation_id=conv_id,
-                session_id=sess_id,  # ✅ Include session_id
-                timestamp=datetime.fromisoformat(timestamp) if timestamp else None,
-                importance=importance if importance else 0.5,
+                content=f"User: {row['user_input']}\nAssistant: {row['assistant_response']}",
+                relevance_score=0.7,
+                conversation_id=row['id'],
+                session_id=row['session_id'],
+                created_at=datetime.fromisoformat(row['timestamp']) if row['timestamp'] else None,
+                importance=0.5,
                 source='sql_conversation'
             ))
         
