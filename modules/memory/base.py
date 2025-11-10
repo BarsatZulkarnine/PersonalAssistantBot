@@ -132,17 +132,17 @@ class RetrievalResult:
     """
     Result of memory retrieval.
     
-    ✅ FIXED: Added session_id for session isolation
+    ✅ FIXED: Consistent field naming (created_at, not timestamp)
     """
     content: str
     relevance_score: float
     fact_id: Optional[int] = None
     conversation_id: Optional[int] = None
-    session_id: Optional[str] = None  # ✅ NEW: Session tracking
+    session_id: Optional[str] = None
     category: Optional[str] = None
     importance: float = 0.5
-    created_at: Optional[datetime] = None
-    source: str = "unknown"  # 'sql', 'vector', 'hybrid', 'recent'
+    created_at: Optional[datetime] = None  
+    source: str = "unknown"
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -151,7 +151,7 @@ class RetrievalResult:
             'relevance_score': self.relevance_score,
             'fact_id': self.fact_id,
             'conversation_id': self.conversation_id,
-            'session_id': self.session_id,  # ✅ NEW
+            'session_id': self.session_id,
             'category': self.category,
             'importance': self.importance,
             'created_at': self.created_at.isoformat() if self.created_at else None,

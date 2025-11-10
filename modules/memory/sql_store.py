@@ -415,15 +415,7 @@ class SQLStore(MemoryStore):
         """
         Get recent conversations from a specific session.
         
-        ✅ NEW: Helper for retrieving recent session context
-        
-        Args:
-            session_id: Session identifier
-            user_id: User identifier
-            limit: Max results
-            
-        Returns:
-            List of RetrievalResult objects
+        ✅ FIXED: Returns RetrievalResult with created_at
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -434,7 +426,7 @@ class SQLStore(MemoryStore):
                 user_input,
                 assistant_response,
                 session_id,
-                timestamp
+                timestamp as created_at
             FROM conversations
             WHERE session_id = ?
                 AND user_id = ?
@@ -445,17 +437,16 @@ class SQLStore(MemoryStore):
         
         results = []
         for row in cursor.fetchall():
-            conv_id, user_input, assistant_response, sess_id, timestamp = row
-            
             results.append(RetrievalResult(
-                content=f"User: {user_input}\nAssistant: {assistant_response}",
-                relevance_score=0.8,  # High relevance for recency
-                conversation_id=conv_id,
-                session_id=sess_id,
-                timestamp=datetime.fromisoformat(timestamp) if timestamp else None,
+                content=f"User: {row['user_input']}\nAssistant: {row['assistant_response']}",
+                relevance_score=0.8,
+                conversation_id=row['id'],
+                session_id=row['session_id'],
+                created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
                 source='recent'
             ))
         
+        logger.debug(f"[{session_id[:20]}...] Retrieved {len(results)} recent conversations")
         return results
 
     def get_all_sessions_for_user(
