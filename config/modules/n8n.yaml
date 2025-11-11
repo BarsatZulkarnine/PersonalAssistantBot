@@ -19,6 +19,20 @@ webhooks:
       - "n8n test"
       - "webhook test"
       - "check webhook"
+
+  alarm:
+    webhook_path: "/webhook-test/alarm"
+    description: "Manage alarms (create, delete, snooze)"
+    confirmation: false
+    intents:
+      - "set alarm"
+      - "create alarm"
+      - "delete alarm"
+      - "remove alarm"
+      - "snooze alarm"
+      - "alarm for"
+      - "wake me up"
+      - "remind me at"
   
   # Joplin Notes
   joplin_note:
@@ -126,3 +140,5 @@ timeout:
   webhook_timeout_seconds: 30
   retry_attempts: 2
   retry_delay_seconds: 5
+
+  

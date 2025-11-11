@@ -317,22 +317,26 @@ class MusicAction(Action):
                 'source': 'local'
             }
         
-        # Try YouTube
+        # Try YouTube - FIXED: Use search_and_download instead of _get_video_info
         if self.player.youtube and self.player.youtube.available:
             try:
-                info = self.player.youtube._get_video_info(query)
+                # Download from YouTube and get the file path
+                cache_path = self.player.youtube.search_and_download(query)
                 
-                if info:
+                if cache_path:
+                    # Extract filename from path
+                    from pathlib import Path
+                    filename = Path(cache_path).stem
+                    
                     return {
                         'type': 'youtube',
-                        'name': info.get('title', query),
-                        'video_id': info.get('id'),
-                        'stream_url': info.get('url'),
-                        'duration': info.get('duration', 0),
+                        'name': filename,
+                        'path': cache_path,
+                        'stream_url': f"/api/music/stream/{filename}",
                         'source': 'youtube'
                     }
             except Exception as e:
-                logger.error(f"YouTube info error: {e}")
+                logger.error(f"YouTube download error: {e}")
         
         return None
     

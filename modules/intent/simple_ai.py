@@ -55,6 +55,7 @@ Classify the user's input into ONE of these categories:
    Examples: 
    - "Turn on lights", "Set volume to 50", "Open Chrome"
    - "Play music", "Play [song name]"
+   - "Set alarm for 8am", "Wake me up at 6:30", "Delete alarm"
    - "Test n8n", "Test webhook", "Send email", "Add to calendar"
    - "Take note", "Create task", "Slack the team"
    - "Trigger workflow", "Run automation"

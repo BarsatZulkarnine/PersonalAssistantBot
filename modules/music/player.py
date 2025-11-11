@@ -1,7 +1,10 @@
 """
-Music Player System - WITH AUTO-PAUSE FOR WAKE WORD
+Music Player System - FIXED VERSION
 
-Automatically pauses music when "hey pi" is detected and resumes after response
+Improvements:
+1. Fuzzy matching for typos/word order
+2. Better YouTube integration
+3. Proper cache handling
 """
 
 import os
@@ -14,13 +17,21 @@ from enum import Enum
 import pygame
 from utils.logger import get_logger
 
+# Use rapidfuzz for better fuzzy matching
+try:
+    from rapidfuzz import fuzz, process
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    from difflib import SequenceMatcher
+    RAPIDFUZZ_AVAILABLE = False
+
 logger = get_logger('music.player')
 
 class PlaybackState(Enum):
     STOPPED = "stopped"
     PLAYING = "playing"
     PAUSED = "paused"
-    AUTO_PAUSED = "auto_paused"  # NEW: Auto-paused for voice interaction
+    AUTO_PAUSED = "auto_paused"
 
 class RepeatMode(Enum):
     NONE = "none"
@@ -29,12 +40,12 @@ class RepeatMode(Enum):
 
 class Song:
     """Represents a song"""
-    def __init__(self, path: str):
+    def __init__(self, path: str, source: str = "local"):
         self.path = path
         self.filename = os.path.basename(path)
         self.name = os.path.splitext(self.filename)[0]
         self.directory = os.path.dirname(path)
-        self.source = "local"
+        self.source = source
     
     def __str__(self):
         return self.name
@@ -54,23 +65,15 @@ class Song:
         return safe
 
 class MusicPlayer:
-    """
-    Music player with background playback and auto-pause support.
-    
-    Features:
-    - Auto-pauses when wake word detected
-    - Auto-resumes after assistant response
-    - Won't be interrupted by TTS
-    """
+    """Music player with fuzzy matching and YouTube integration"""
     
     def __init__(self, config: dict):
         self.config = config
         
-        # Initialize pygame mixer with more channels
+        # Initialize pygame mixer
         if not pygame.mixer.get_init():
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
         
-        # Reserve channel 0 for music (TTS will use music channel)
         pygame.mixer.set_num_channels(8)
         self.music_channel = pygame.mixer.Channel(0)
         
@@ -84,7 +87,7 @@ class MusicPlayer:
         self.shuffle_enabled = config.get('playback', {}).get('shuffle', False)
         self.repeat_mode = RepeatMode(config.get('playback', {}).get('repeat', 'none'))
         
-        # NEW: Auto-pause settings
+        # Auto-pause settings
         self.auto_pause_enabled = config.get('playback', {}).get('auto_pause', True)
         self.was_playing_before_pause = False
         
@@ -92,18 +95,24 @@ class MusicPlayer:
         self.playback_thread: Optional[threading.Thread] = None
         self.stop_flag = threading.Event()
         
-        # Music library
+        # YouTube streamer - MUST initialize BEFORE library scan
+        self.youtube = None
+        try:
+            if config.get('youtube', {}).get('enabled', True):
+                from modules.music.youtube import YouTubeStreamer
+                self.youtube = YouTubeStreamer(config)
+                if self.youtube.available:
+                    logger.info("YouTube integration enabled")
+        except Exception as e:
+            logger.warning(f"YouTube unavailable: {e}")
+            self.youtube = None
+        
+        # Music library (scans both local + YouTube cache)
         self.library: List[Song] = []
         self._scan_library()
         
-        # YouTube streamer
-        self.youtube = None
-        if config.get('youtube', {}).get('enabled', True):
-            try:
-                from modules.music.youtube import YouTubeStreamer
-                self.youtube = YouTubeStreamer(config)
-            except Exception as e:
-                logger.warning(f"YouTube unavailable: {e}")
+        # Verify youtube attribute exists
+        assert hasattr(self, 'youtube'), "YouTube attribute not set!"
         
         logger.info(f"[OK] Music player initialized ({len(self.library)} songs)")
         print(f"[OK] Music player: {len(self.library)} songs in library")
@@ -126,17 +135,171 @@ class MusicPlayer:
             
             for ext in formats:
                 for file_path in dir_path.rglob(f"*.{ext}"):
-                    song = Song(str(file_path))
+                    song = Song(str(file_path), source="local")
+                    self.library.append(song)
+        
+        # Also scan YouTube cache
+        if self.youtube and hasattr(self.youtube, 'cache_dir'):
+            cache_dir = self.youtube.cache_dir
+            if cache_dir.exists():
+                for file_path in cache_dir.glob("*.mp3"):
+                    song = Song(str(file_path), source="youtube_cache")
                     self.library.append(song)
         
         logger.info(f"Found {len(self.library)} songs")
+    
+    def _similarity(self, a: str, b: str) -> float:
+        """Calculate similarity between two strings (0.0 to 1.0)"""
+        if RAPIDFUZZ_AVAILABLE:
+            # Use token_sort_ratio for better word order handling
+            return fuzz.token_sort_ratio(a, b) / 100.0
+        else:
+            return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    
+    def _normalize_query(self, query: str) -> str:
+        """Normalize query for better matching"""
+        # Remove common words and punctuation
+        common_words = {'the', 'a', 'an', 'by', 'ft', 'feat', 'featuring', '-'}
+        words = query.lower().split()
+        words = [w.strip('.,!?;:()[]{}') for w in words if w.lower() not in common_words]
+        return ' '.join(words)
+    
+    def _find_song(self, query: str, threshold: float = 0.65) -> Optional[Song]:
+        """
+        Find song using advanced fuzzy matching with rapidfuzz.
+        
+        Tries multiple strategies:
+        1. Exact match (case-insensitive)
+        2. Fuzzy match with typo tolerance
+        3. Partial word match
+        
+        Args:
+            query: Search query (can have typos, different word order)
+            threshold: Minimum similarity score (0.0 to 1.0)
+            
+        Returns:
+            Best matching song or None
+        """
+        if not self.library:
+            return None
+        
+        query_lower = query.lower().strip()
+        
+        # Strategy 1: Exact match (case-insensitive)
+        for song in self.library:
+            if query_lower == song.name.lower():
+                logger.info(f"✓ Exact match: '{song.name}'")
+                return song
+        
+        # Strategy 2: Use rapidfuzz if available (best for typos)
+        if RAPIDFUZZ_AVAILABLE:
+            # Create list of song names with original casing for display
+            song_names = [song.name for song in self.library]
+            
+            # Try multiple scorers for best results
+            scorers = [
+                (fuzz.token_sort_ratio, "token_sort"),  # Best for word order + typos
+                (fuzz.partial_ratio, "partial"),         # Good for partial matches
+                (fuzz.ratio, "ratio")                    # Standard fuzzy match
+            ]
+            
+            best_overall = None
+            best_overall_score = 0
+            
+            for scorer, scorer_name in scorers:
+                result = process.extractOne(
+                    query_lower,
+                    song_names,
+                    scorer=scorer,
+                    score_cutoff=threshold * 100
+                )
+                
+                if result:
+                    matched_name, score, index = result
+                    
+                    if score > best_overall_score:
+                        best_overall = (self.library[index], score / 100.0, scorer_name)
+                        best_overall_score = score
+            
+            if best_overall:
+                song, score, scorer_name = best_overall
+                logger.info(f"✓ Fuzzy match: '{song.name}' (score={score:.2f}, method={scorer_name})")
+                return song
+            
+            logger.warning(f"✗ No match for '{query}' (tried fuzzy matching)")
+            return None
+        
+        # Fallback: Manual fuzzy matching if rapidfuzz not available
+        return self._find_song_manual(query_lower, threshold)
+    
+    def _find_song_manual(self, query_lower: str, threshold: float) -> Optional[Song]:
+        """Manual fuzzy matching fallback (when rapidfuzz not available)"""
+        query_norm = self._normalize_query(query_lower)
+        query_words = set(query_norm.split())
+        
+        best_match = None
+        best_score = 0.0
+        
+        logger.debug(f"Manual search for: '{query_lower}' (normalized: '{query_norm}')")
+        
+        for song in self.library:
+            song_norm = self._normalize_query(song.name.lower())
+            song_words = set(song_norm.split())
+            
+            # Calculate multiple similarity metrics
+            
+            # 1. Overall string similarity
+            overall_sim = self._similarity(query_norm, song_norm)
+            
+            # 2. Word overlap (Jaccard similarity)
+            if query_words and song_words:
+                word_overlap = len(query_words & song_words) / len(query_words | song_words)
+            else:
+                word_overlap = 0.0
+            
+            # 3. Check if ALL query words are in song (better for short queries)
+            all_query_words_in_song = all(qw in song_norm for qw in query_words) if query_words else False
+            all_words_bonus = 0.3 if all_query_words_in_song else 0.0
+            
+            # 4. Substring match bonus
+            substring_bonus = 0.2 if query_norm in song_norm or song_norm in query_norm else 0.0
+            
+            # Combined score (weighted average)
+            score = (overall_sim * 0.3) + (word_overlap * 0.3) + all_words_bonus + substring_bonus
+            
+            # Debug logging for close matches
+            if score > 0.4:
+                logger.debug(f"  '{song.name}' -> score={score:.2f}")
+            
+            if score > best_score:
+                best_score = score
+                best_match = song
+        
+        if best_match and best_score >= threshold:
+            logger.info(f"✓ Manual match: '{best_match.name}' (score={best_score:.2f})")
+            return best_match
+        
+        logger.warning(f"✗ No manual match for '{query_lower}' (best score={best_score:.2f})")
+        return None
     
     def _playback_worker(self, song: Song):
         """Background worker for music playback"""
         try:
             logger.info(f"Loading song: {song.name}")
             
-            # Load as Sound object (not music)
+            # Check if file exists and is ready
+            if not os.path.exists(song.path):
+                logger.error(f"File not found: {song.path}")
+                self.state = PlaybackState.STOPPED
+                return
+            
+            # Wait a bit if file is very small (might still be downloading)
+            file_size = os.path.getsize(song.path)
+            if file_size < 10000:  # Less than 10KB
+                logger.info("File seems incomplete, waiting...")
+                time.sleep(2)
+            
+            # Load as Sound object
             sound = pygame.mixer.Sound(song.path)
             self.current_sound = sound
             sound.set_volume(self.volume)
@@ -181,43 +344,25 @@ class MusicPlayer:
         
         # Find song
         if query:
-            song = self._find_song(query)
+            # First try local/cache with fuzzy matching
+            song = self._find_song(query, threshold=0.6)
             
             # Try YouTube if not found locally
             if not song and use_youtube and self.youtube and self.youtube.available:
                 print(f"[MUSIC] Not found locally, searching YouTube...")
                 
-                # Use stream + background download
-                stream_url, cache_path = self.youtube.get_stream_and_download(query)
+                # Download from YouTube (blocking to ensure file is ready)
+                cache_path = self.youtube.search_and_download(query)
                 
-                if stream_url:
-                    # Check if it's a cached file or stream URL
-                    if stream_url.startswith('http'):
-                        print(f"[MUSIC] 🌐 Streaming from YouTube...")
-                        # For now, we need the file downloaded
-                        # TODO: Support direct URL streaming
-                        print(f"[MUSIC] ⏳ Waiting for download...")
-                        
-                        # Wait a bit for download to complete
-                        max_wait = 60  # 60 seconds max
-                        waited = 0
-                        while not os.path.exists(cache_path) and waited < max_wait:
-                            time.sleep(1)
-                            waited += 1
-                        
-                        if os.path.exists(cache_path):
-                            song = Song(cache_path)
-                            song.source = "youtube"
-                        else:
-                            return f"Download timed out for '{query}'"
-                    else:
-                        # Already cached
-                        song = Song(stream_url)
-                        song.source = "youtube"
+                if cache_path and os.path.exists(cache_path):
+                    song = Song(cache_path, source="youtube")
+                    # Add to library for future fuzzy matching
+                    self.library.append(song)
+                    logger.info(f"Downloaded from YouTube: {song.name}")
                 else:
-                    return f"Could not find '{query}' locally or on YouTube"
+                    return f"Could not find or download '{query}'"
             elif not song:
-                return f"Could not find '{query}' in library"
+                return f"Could not find '{query}' (tried fuzzy matching)"
             
             self.current_song = song
         else:
@@ -238,19 +383,19 @@ class MusicPlayer:
         )
         self.playback_thread.start()
         
-        source_label = "YouTube" if self.current_song.source == "youtube" else "Library"
+        source_label = {
+            "local": "Library",
+            "youtube": "YouTube",
+            "youtube_cache": "Cache"
+        }.get(self.current_song.source, "Unknown")
+        
         logger.info(f"Started playback ({source_label}): {self.current_song.name}")
         
         return f"Now playing {self.current_song.name}"
     
-    # NEW: Auto-pause methods for wake word detection
+    # AUTO-PAUSE METHODS
     def auto_pause(self) -> bool:
-        """
-        Auto-pause music (called when wake word detected).
-        
-        Returns:
-            True if music was paused, False if nothing was playing
-        """
+        """Auto-pause music (called when wake word detected)"""
         if not self.auto_pause_enabled:
             return False
         
@@ -265,12 +410,7 @@ class MusicPlayer:
         return False
     
     def auto_resume(self) -> bool:
-        """
-        Auto-resume music (called after assistant response).
-        
-        Returns:
-            True if music was resumed, False if nothing to resume
-        """
+        """Auto-resume music (called after assistant response)"""
         if not self.auto_pause_enabled:
             return False
         
@@ -333,7 +473,6 @@ class MusicPlayer:
             song = self.history.pop()
             self.current_song = song
             
-            # Use background playback
             self.stop_flag.clear()
             self.playback_thread = threading.Thread(
                 target=self._playback_worker,
@@ -401,21 +540,11 @@ class MusicPlayer:
             'auto_pause': self.auto_pause_enabled
         }
     
-    def _find_song(self, query: str) -> Optional[Song]:
-        """Find song by name (fuzzy match)"""
-        query_lower = query.lower()
-        
-        # Exact match
-        for song in self.library:
-            if query_lower == song.name.lower():
-                return song
-        
-        # Partial match
-        for song in self.library:
-            if query_lower in song.name.lower():
-                return song
-        
-        return None
+    def rescan_library(self):
+        """Rescan library (useful after YouTube downloads)"""
+        self.library.clear()
+        self._scan_library()
+        logger.info(f"Rescanned library: {len(self.library)} songs")
     
     def is_playing(self) -> bool:
         """Check if music is currently playing"""
