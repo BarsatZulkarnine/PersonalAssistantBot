@@ -108,7 +108,6 @@ class EventBus:
         client_type: str = "unknown"
     ):
         """Register new WebSocket connection"""
-        await websocket.accept()
         
         # Add to connections
         if session_id not in self.connections:
