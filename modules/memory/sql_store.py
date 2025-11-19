@@ -686,29 +686,47 @@ class SQLStore(MemoryStore):
 
     def _clean_fts_query(self, query: str) -> str:
         """Clean and escape FTS5 query string"""
-        # Remove special characters that could cause FTS5 syntax errors
         import re
         
+        # If query is empty or just whitespace, return empty
+        if not query or not query.strip():
+            return ""
+        
         # Remove or replace problematic characters
-        query = re.sub(r'[!?.,;:\'"`(){}[\]<>|/\\&^%$#@]', ' ', query)
+        # FTS5 special chars: + - ( ) " * AND OR NOT NEAR
+        query = re.sub(r'[+\-!?.,;:\'"`(){}[\]<>|/\\&^%$#@=]', ' ', query)
         
         # Normalize whitespace
         query = ' '.join(query.split())
         
+        # If query is empty after cleaning, return empty
         if not query:
-            return '*'  # Return wildcard if query is empty after cleaning
-            
-        # Add fuzzy matching
+            return ""
+        
+        # Split into terms
         terms = query.split()
+        
+        # Filter out FTS5 reserved words and short terms
+        fts5_reserved = {'and', 'or', 'not', 'near'}
+        valid_terms = [
+            term for term in terms 
+            if term.lower() not in fts5_reserved and len(term) > 1
+        ]
+        
+        # If no valid terms, return empty
+        if not valid_terms:
+            return ""
+        
+        # Add fuzzy matching for longer terms only
         cleaned_terms = []
-        for term in terms:
-            if len(term) > 2:  # Only add fuzzy matching for longer terms
+        for term in valid_terms:
+            if len(term) > 2:  # Only add wildcard for terms with 3+ chars
                 cleaned_terms.append(f'{term}*')
             else:
                 cleaned_terms.append(term)
         
+        # Join with OR for better matching
         return ' OR '.join(cleaned_terms)
-    
     def _row_to_conversation(self, row: sqlite3.Row) -> Conversation:
         """Convert DB row to Conversation object"""
         return Conversation(

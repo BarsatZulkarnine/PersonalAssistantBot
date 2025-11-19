@@ -312,7 +312,7 @@ class ConversationService:
         session_id: str
     ) -> str:
         """Handle general conversation"""
-        logger.debug(f"[{session_id}] Handling conversation...")
+        logger.debug(f"[{session_id[:20]}...] Handling conversation...")
         
         conv_action = None
         for action in self.actions.get_all_actions().values():
@@ -321,26 +321,33 @@ class ConversationService:
                 break
         
         if not conv_action:
-            logger.warning(f"[{session_id}] AI chat action not found")
+            logger.warning(f"[{session_id[:20]}...] AI chat action not found")
             return "I'm not sure how to respond to that."
         
         params = {}
         full_context = ""
         
+        # ✅ FIX: Build context properly
         if memory_context:
+            full_context += "=== CONVERSATION HISTORY ===\n"
             full_context += memory_context
+            logger.info(f"[{session_id[:20]}...] Added memory context ({len(memory_context)} chars)")
         
         if rag_context:
             if full_context:
                 full_context += "\n\n"
+            full_context += "=== RELEVANT DOCUMENTS ===\n"
             full_context += rag_context
+            logger.info(f"[{session_id[:20]}...] Added RAG context ({len(rag_context)} chars)")
         
         if full_context:
             params['memory_context'] = full_context
             logger.info(
-                f"[{session_id}] Using combined context "
+                f"[{session_id[:20]}...] Using combined context "
                 f"({len(full_context)} chars)"
             )
+        else:
+            logger.warning(f"[{session_id[:20]}...] NO CONTEXT AVAILABLE!")
         
         result = await conv_action.execute(user_input, params=params)
         return result.message

@@ -6,7 +6,7 @@ app:
 
 # Speech Recognition
 speech:
-  hotword: "hey pi"
+  hotword: "hey jarvis"
   listen_timeout: 5
   phrase_time_limit: 10
   language: "en"

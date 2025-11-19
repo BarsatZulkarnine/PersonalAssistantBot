@@ -250,14 +250,6 @@ class MemoryManager:
     ) -> List[RetrievalResult]:
         """
         Retrieve relevant context with SESSION ISOLATION.
-        
-        ✅ FIXED: Proper session filtering
-        ✅ FIXED: Better logging for debugging
-        
-        Returns:
-            - Recent conversations FROM THIS SESSION
-            - Conversation search FROM THIS SESSION
-            - Facts SHARED ACROSS SESSIONS
         """
         try:
             all_results = []
@@ -269,16 +261,14 @@ class MemoryManager:
                 f"  - include_facts: {include_facts}"
             )
             
-            # ============================================
-            # 1. RECENT CONVERSATIONS (SESSION-FILTERED)
-            # ============================================
+            # 1. RECENT CONVERSATIONS (SESSION-FILTERED) - ALWAYS INCLUDE
             if include_recent:
-                logger.debug(f"[{session_id[:20]}...] → Getting recent conversations (THIS session only)")
+                logger.debug(f"[{session_id[:20]}...] → Getting recent conversations")
                 
                 recent_results = self.sql_store.get_recent_conversations_from_session(
                     session_id=session_id,
                     user_id=user_id,
-                    limit=3
+                    limit=5  # ✅ CHANGED: Get more recent conversations
                 )
                 
                 all_results.extend(recent_results)
@@ -286,38 +276,56 @@ class MemoryManager:
                 logger.info(
                     f"[{session_id[:20]}...] ✓ Found {len(recent_results)} recent from THIS session"
                 )
-                
-                # Debug log each recent conversation
-                for i, r in enumerate(recent_results, 1):
-                    logger.debug(f"  Recent {i}: {r.content[:100]}...")
             
-            # ============================================
-            # 2. CONVERSATION SEARCH (SESSION-FILTERED)
-            # ============================================
-            logger.debug(f"[{session_id[:20]}...] → Searching conversations (THIS session only)")
+            # 2. SEARCH PAST CONVERSATIONS (SESSION-FILTERED)
+            # ✅ FIX: Use LIKE search instead of FTS which was failing
+            logger.debug(f"[{session_id[:20]}...] → Searching past conversations")
             
-            search_results = self.sql_store.search_conversations(
-                query=query,
-                user_id=user_id,
-                session_id=session_id,  # ✅ CRITICAL: Session filter
-                limit=max_results // 2
-            )
+            conn = self.sql_store._get_connection()
+            cursor = conn.cursor()
             
-            all_results.extend(search_results)
+            # Simple LIKE search for conversations
+            cursor.execute("""
+                SELECT 
+                    id,
+                    user_input,
+                    assistant_response,
+                    session_id,
+                    timestamp as created_at
+                FROM conversations
+                WHERE (user_input LIKE ? OR assistant_response LIKE ?)
+                    AND user_id = ?
+                    AND session_id = ?
+                    AND deleted_at IS NULL
+                    AND id NOT IN (
+                        SELECT id FROM (
+                            SELECT id FROM conversations
+                            WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL
+                            ORDER BY timestamp DESC
+                            LIMIT 5
+                        )
+                    )
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (f'%{query}%', f'%{query}%', user_id, session_id, session_id, user_id, max_results))
+            
+            for row in cursor.fetchall():
+                all_results.append(RetrievalResult(
+                    content=f"User: {row[1]}\nAssistant: {row[2]}",
+                    relevance_score=0.6,
+                    conversation_id=row[0],
+                    session_id=row[3],
+                    created_at=datetime.fromisoformat(row[4]) if row[4] else None,
+                    source='sql_search'
+                ))
             
             logger.info(
-                f"[{session_id[:20]}...] ✓ Found {len(search_results)} conversation matches from THIS session"
+                f"[{session_id[:20]}...] ✓ Found {len([r for r in all_results if r.source == 'sql_search'])} search matches"
             )
             
-            # Debug log each search result
-            for i, r in enumerate(search_results, 1):
-                logger.debug(f"  Search {i}: {r.content[:100]}...")
-            
-            # ============================================
-            # 3. SHARED FACTS (CROSS-SESSION)
-            # ============================================
+            # 3. SHARED FACTS (CROSS-SESSION) - Only if requested
             if include_facts:
-                logger.debug(f"[{session_id[:20]}...] → Searching shared facts (cross-session)")
+                logger.debug(f"[{session_id[:20]}...] → Searching shared facts")
                 
                 # FTS search for facts
                 fact_fts_results = self.sql_store.search_facts(
@@ -328,7 +336,7 @@ class MemoryManager:
                 all_results.extend(fact_fts_results)
                 
                 logger.info(
-                    f"[{session_id[:20]}...] ✓ Found {len(fact_fts_results)} fact matches (FTS)"
+                    f"[{session_id[:20]}...] ✓ Found {len(fact_fts_results)} fact matches"
                 )
                 
                 # Vector search for facts (if available)
@@ -343,15 +351,13 @@ class MemoryManager:
                     all_results.extend(fact_vector_results)
                     
                     logger.info(
-                        f"[{session_id[:20]}...] ✓ Found {len(fact_vector_results)} fact matches (vector)"
+                        f"[{session_id[:20]}...] ✓ Found {len(fact_vector_results)} vector matches"
                     )
             
-            # ============================================
             # 4. DEDUPLICATE AND RANK
-            # ============================================
             results = self._deduplicate_and_rank(all_results, max_results)
             
-            # ✅ COUNT BY SOURCE
+            # Count by source
             session_count = sum(1 for r in results if r.session_id == session_id)
             fact_count = sum(1 for r in results if r.session_id is None)
             
@@ -361,14 +367,6 @@ class MemoryManager:
                 f"  From THIS session: {session_count}\n"
                 f"  Shared facts: {fact_count}"
             )
-            
-            # Debug log final results
-            for i, r in enumerate(results, 1):
-                source_label = "SESSION" if r.session_id == session_id else "FACT"
-                logger.debug(
-                    f"  Result {i} [{source_label}]: {r.content[:80]}... "
-                    f"(score={r.relevance_score:.2f})"
-                )
             
             return results
             

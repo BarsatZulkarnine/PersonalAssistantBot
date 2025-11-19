@@ -99,16 +99,23 @@ class AIChatAction(Action):
     def _build_system_prompt(self, memory_context: str = "") -> str:
         """Build system prompt with optional memory context"""
         base_prompt = """You are a helpful and friendly AI assistant. 
-Answer questions clearly and concisely. 
-Be conversational but informative."""
+    Answer questions clearly and concisely. 
+    Be conversational but informative.
+
+    IMPORTANT: If the user asks about previous conversations or things they told you,
+    check the conversation history below and reference it in your response."""
         
         if memory_context:
             base_prompt += f"""
 
-{memory_context}
+    {memory_context}
 
-Use the above information to provide personalized, contextual responses. 
-Reference past conversations naturally when relevant.
-If the user asks about something in memory, answer based on what you know."""
+    USE THE ABOVE INFORMATION to provide personalized, contextual responses. 
+    When the user asks "what was my last question" or similar, refer to the conversation history above.
+    Reference past conversations naturally when relevant."""
+        else:
+            base_prompt += """
+
+    Note: No previous conversation history is available for this session yet."""
         
         return base_prompt
