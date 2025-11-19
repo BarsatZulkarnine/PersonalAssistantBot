@@ -11,6 +11,7 @@ import time
 import uuid
 from typing import Optional, Dict, Any
 from datetime import datetime
+import asyncio
 
 from modules.intent.base import IntentType
 from modules.actions.registry import ActionRegistry
@@ -30,11 +31,14 @@ class ConversationService:
         action_registry: ActionRegistry,
         memory_manager: Optional[MemoryManager] = None,
         rag_retriever: Optional[HybridRetriever] = None
+        
     ):
         self.intent = intent_detector
         self.actions = action_registry
         self.memory = memory_manager
         self.rag = rag_retriever
+        self._current_session_id = None
+
         
         logger.info("ConversationService initialized (client-aware)")
     
@@ -49,7 +53,7 @@ class ConversationService:
         user_input: str,
         session_id: Optional[str] = None,
         user_id: str = "default_user",
-        client_type: str = "server"  # ✅ NEW PARAMETER
+        client_type: str = "server"  
     ) -> Dict[str, Any]:
         """
         Process user input with client awareness.
@@ -67,9 +71,12 @@ class ConversationService:
         
         # Generate session ID if not provided
         if not session_id:
-            session_id = self._generate_session_id(user_id)
-            logger.info(f"Generated new session: {session_id}")
-        
+            if not self._current_session_id:
+                self._current_session_id = self._generate_session_id(user_id)
+                logger.info(f"Generated new session: {self._current_session_id}")
+            session_id = self._current_session_id
+        else:
+            self._current_session_id = session_id
         try:
             logger.info(f"[{session_id}] Processing: {user_input[:50]}... (client={client_type})")
             
@@ -180,6 +187,8 @@ class ConversationService:
                         completion_tokens=0
                     )
                     
+                    await asyncio.sleep(0.1)  # Give DB time to commit
+
                     memory_stored = classification.should_store()
                     memory_category = classification.category.value
                     logger.info(

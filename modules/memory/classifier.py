@@ -10,11 +10,16 @@ from typing import Optional, List
 from modules.memory.base import (
     MemoryClassifier, MemoryClassification, MemoryCategory, FactCategory
 )
-from core.ai.integration import get_ai_provider
-from core.ai import AIMessage
+
 from utils.logger import get_logger
 
 logger = get_logger('memory.classifier')
+
+
+def get_ai_provider():
+    from core.ai.integration import get_ai_provider as _provider
+    return _provider()
+
 
 class AIMemoryClassifier(MemoryClassifier):
     """
@@ -55,6 +60,7 @@ class AIMemoryClassifier(MemoryClassifier):
         Returns:
             MemoryClassification with category and importance
         """
+        from core.ai import AIMessage
         try:
             # Build prompts
             system_prompt = self._build_system_prompt()
