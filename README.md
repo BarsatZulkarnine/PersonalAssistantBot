@@ -35,6 +35,36 @@ A fully modular, extensible voice assistant with intelligent memory, document se
 
 ---
 
+# Personal Assistant Bot - Architecture Overview
+
+```
+## 📐 Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Orchestrator                       │
+│          (Coordinates all modules)                   │
+└──────────────┬──────────────────────────────────────┘
+               │
+     ┌─────────┴─────────┐
+     │   Module Loader    │  ← Loads modules dynamically
+     └─────────┬──────────┘     based on config
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───▼────┐  ┌───▼────┐  ┌▼──────┐  ┌─▼────┐  ┌─▼─────┐
+│ Wake   │  │  STT   │  │  TTS  │  │Intent│  │Actions│
+│ Word   │  │        │  │       │  │      │  │       │
+└───┬────┘  └───┬────┘  └┬──────┘  └─┬────┘  └─┬─────┘
+    │           │         │           │         │
+┌───▼────┐  ┌───▼────┐  ┌▼──────┐  ┌─▼────┐  ┌─▼─────┐
+│Vosk/   │  │Google/ │  │gTTS/  │  │Simple│  │ Home  │
+│Porcupine│  │Whisper│  │Eleven │  │ AI   │  │ Auto  │
+└────────┘  └────────┘  └───────┘  └──────┘  └───────┘
+  (Choose)    (Choose)    (Choose)  (Choose)  (Categories)
+
+```  
+
 ## 🚀 Quick Start
 
 ### 1. Installation
@@ -167,42 +197,6 @@ Assistant: "It's 22°C and sunny..."
 
 ---
 
-## 📚 Documentation
-
-### Getting Started
-- **[Installation Guide](docs/INSTALLATION.md)** - Detailed setup instructions
-- **[Configuration Guide](docs/CONFIGURATION.md)** - Configure all modules
-- **[Quick Start Examples](docs/QUICK_START.md)** - Common usage patterns
-
-### Core Systems
-- **[Memory System](docs/MEMORY_SYSTEM.md)** - How intelligent memory works
-- **[RAG System](docs/RAG_SYSTEM.md)** - Document search explained
-- **[n8n Integration](docs/N8N_INTEGRATION.md)** - Connect external services
-
-### Module Documentation
-- **[Wake Word Detection](docs/modules/WAKE_WORD.md)** - Activation phrase detection
-- **[Speech-to-Text](docs/modules/STT.md)** - Voice recognition
-- **[Text-to-Speech](docs/modules/TTS.md)** - Voice synthesis
-- **[Intent Detection](docs/modules/INTENT.md)** - Understanding requests
-- **[Actions System](docs/modules/ACTIONS.md)** - Extensible commands
-
-### Development
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design
-- **[Adding Actions](docs/dev/ADDING_ACTIONS.md)** - Create custom commands
-- **[Adding Providers](docs/dev/ADDING_PROVIDERS.md)** - New STT/TTS providers
-- **[API Reference](docs/dev/API_REFERENCE.md)** - Code documentation
-
-### Deployment
-- **[Raspberry Pi Setup](docs/deployment/RASPBERRY_PI.md)** - Deploy on Pi
-- **[Docker Deployment](docs/deployment/DOCKER.md)** - Container deployment
-- **[Headless Mode](docs/deployment/HEADLESS.md)** - Run without display
-
-### Troubleshooting
-- **[Common Issues](docs/TROUBLESHOOTING.md)** - Solutions to common problems
-- **[FAQ](docs/FAQ.md)** - Frequently asked questions
-
----
-
 ## 🎨 Configuration Examples
 
 ### Switch to Whisper STT
@@ -235,74 +229,6 @@ entertainment:
     enabled: true
 ```
 
----
-
-## 💰 Cost Breakdown
-
-| Component | Provider | Cost |
-|-----------|----------|------|
-| **STT** | Google (free tier) | $0/month |
-| **TTS** | OpenAI | ~$2/month |
-| **AI Chat** | OpenAI (gpt-4o-mini) | ~$1/month |
-| **Memory Classification** | OpenAI | ~$1/month |
-| **Memory Storage** | Local (SQLite + ChromaDB) | $0 |
-| **RAG** | Local (embeddings) | $0 |
-| **n8n** | Self-hosted | $0 |
-| **Web Search** | Brave API (free tier) | $0/month |
-| **Total** | | **~$4/month** |
-
-*Based on moderate usage (1000 conversations/month)*
-
----
-
-## 🛠️ Technology Stack
-
-- **Python 3.10+** - Core language
-- **OpenAI API** - AI processing
-- **SpeechRecognition** - Voice input
-- **pygame** - Audio playback
-- **SQLite** - Structured data storage
-- **ChromaDB** - Vector embeddings
-- **n8n** - Workflow automation
-- **yt-dlp** - YouTube music support
-
----
-
-## 📊 System Requirements
-
-### Minimum
-- Python 3.10+
-- 2GB RAM
-- Microphone (for voice input)
-- Speaker (for voice output)
-- Internet connection
-
-### Recommended
-- Python 3.11+
-- 4GB RAM
-- USB microphone (better quality)
-- Dedicated speaker/headphones
-- Fast internet connection
-
-### Optional
-- NVIDIA GPU (for Whisper STT)
-- Raspberry Pi 4 (for deployment)
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](docs/CONTRIBUTING.md) first.
-
-### Areas for Contribution
-- New action implementations
-- Additional STT/TTS providers
-- Improved wake word detection
-- Documentation improvements
-- Bug fixes and testing
-
----
-
 ## 📝 License
 
 MIT License - See [LICENSE](LICENSE) file for details.
@@ -319,26 +245,5 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/voice-assistant/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/voice-assistant/discussions)
-- **Documentation**: [docs/](docs/)
-
----
-
-## 🗺️ Roadmap
-
-- [x] Modular architecture
-- [x] Memory system with RAG
-- [x] n8n integration
-- [x] Music playback with YouTube
-- [ ] Multi-user support
-- [ ] Mobile app
-- [ ] Voice training/customization
-- [ ] Plugin marketplace
-- [ ] Cloud sync (optional)
-
----
 
 **Built with ❤️ for voice-first interaction**
